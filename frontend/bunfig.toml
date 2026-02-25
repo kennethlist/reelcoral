@@ -1,0 +1,3 @@
+[install]
+# Use bun's lockfile
+saveTextLockfile = true

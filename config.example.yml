@@ -1,0 +1,35 @@
+server:
+  port: 8080
+  secret: "change-me-to-a-random-string"
+
+media:
+  root: "/media"
+  extensions: [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".wmv", ".flv"]
+
+transcoding:
+  hardware: "vaapi"           # "vaapi", "qsv", or "software"
+  vaapi_device: "/dev/dri/renderD128"
+  segment_duration: 4
+  max_sessions: 4
+  profiles:
+    - name: "1080p"
+      width: 1920
+      height: 1080
+      video_bitrate: "6M"
+      audio_bitrate: "192k"
+    - name: "720p"
+      width: 1280
+      height: 720
+      video_bitrate: "3M"
+      audio_bitrate: "128k"
+    - name: "480p"
+      width: 854
+      height: 480
+      video_bitrate: "1.5M"
+      audio_bitrate: "128k"
+    - name: "original"
+
+auth:
+  users:
+    - username: "admin"
+      password: "admin"
