@@ -22,7 +22,7 @@ export default function SearchBar({ value, onChange }: Props) {
   return (
     <input
       type="text"
-      placeholder="Search files..."
+      placeholder="Filter..."
       value={local}
       onChange={(e) => handleChange(e.target.value)}
       className="px-3 py-1.5 bg-gray-800 border border-gray-700 rounded text-sm focus:outline-none focus:border-blue-500 w-full max-w-xs"

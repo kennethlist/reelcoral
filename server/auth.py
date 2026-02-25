@@ -15,7 +15,7 @@ def login():
     username = data.get("username", "")
     password = data.get("password", "")
 
-    users = current_app.config["KMC"].get("auth", {}).get("users", [])
+    users = current_app.config["MEDIA"].get("auth", {}).get("users", [])
     for user in users:
         if user["username"] == username and user["password"] == password:
             session["user"] = username

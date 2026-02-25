@@ -37,12 +37,12 @@ COPY --from=frontend-build /build/dist ./frontend/dist
 # Create directories
 RUN mkdir -p /cache/thumbnails /config
 
-ENV KMC_CONFIG=/config/config.yml
-ENV KMC_CACHE_DIR=/cache/thumbnails
-ENV KMC_STREAM_TMPDIR=/tmp/kmc_streams
+ENV MEDIA_CONFIG=/config/config.yml
+ENV MEDIA_CACHE_DIR=/cache/thumbnails
+ENV MEDIA_STREAM_TMPDIR=/tmp/media_streams
 ENV PATH="/app/venv/bin:$PATH"
 
 EXPOSE 8080
 
 WORKDIR /app/server
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "4", "--threads", "8", "--timeout", "300", "app:create_app()"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--worker-class", "gevent", "--workers", "1", "--worker-connections", "200", "--timeout", "300", "app:create_app()"]

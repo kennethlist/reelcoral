@@ -4,14 +4,24 @@ server:
 
 media:
   root: "/media"
-  extensions: [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".wmv", ".flv"]
+  extensions: [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".wmv", ".flv", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
 
 transcoding:
   hardware: "vaapi"           # "vaapi", "qsv", or "software"
   vaapi_device: "/dev/dri/renderD128"
-  segment_duration: 4
+  segment_duration: 1
   max_sessions: 4
   profiles:
+    - name: "4K"
+      width: 3840
+      height: 2160
+      video_bitrate: "40M"
+      audio_bitrate: "192k"
+    - name: "1440p"
+      width: 2560
+      height: 1440
+      video_bitrate: "20M"
+      audio_bitrate: "192k"
     - name: "1080p"
       width: 1920
       height: 1080
@@ -27,7 +37,21 @@ transcoding:
       height: 480
       video_bitrate: "1.5M"
       audio_bitrate: "128k"
+    - name: "360p"
+      width: 640
+      height: 360
+      video_bitrate: "800k"
+      audio_bitrate: "96k"
+    - name: "240p"
+      width: 426
+      height: 240
+      video_bitrate: "500k"
+      audio_bitrate: "64k"
     - name: "original"
+
+thumbnails:
+  generate_on_fly: true
+  threads: 24
 
 auth:
   users:

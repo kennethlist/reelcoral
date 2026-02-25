@@ -1,3 +1,5 @@
+import { langName } from "../utils/languages";
+
 interface Track {
   index: number;
   codec: string;
@@ -16,7 +18,7 @@ interface Props {
 }
 
 function trackLabel(t: Track): string {
-  const parts = [t.lang];
+  const parts = [langName(t.lang)];
   if (t.title) parts.push(t.title);
   if (t.channels) parts.push(`${t.channels}ch`);
   if (t.bitmap) parts.push("(bitmap - unsupported)");

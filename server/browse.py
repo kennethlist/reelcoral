@@ -3,10 +3,12 @@ from flask import Blueprint, request, jsonify, current_app
 
 browse_bp = Blueprint("browse", __name__)
 
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+
 
 @browse_bp.route("/browse")
 def browse():
-    config = current_app.config["KMC"]
+    config = current_app.config["MEDIA"]
     root = config["media"]["root"]
     extensions = set(config["media"].get("extensions", []))
 
@@ -14,6 +16,7 @@ def browse():
     page = max(1, int(request.args.get("page", 1)))
     limit = min(200, max(1, int(request.args.get("limit", 50))))
     search = request.args.get("search", "").lower().strip()
+    letter = request.args.get("letter", "").strip()
 
     abs_path = os.path.realpath(os.path.join(root, rel_path))
     if not abs_path.startswith(os.path.realpath(root)):
@@ -46,6 +49,7 @@ def browse():
             "is_dir": is_dir,
         }
         if not is_dir:
+            entry["is_image"] = ext in IMAGE_EXTS
             try:
                 entry["size"] = os.path.getsize(full)
             except OSError:
@@ -54,6 +58,22 @@ def browse():
 
     # Sort: directories first, then files
     entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+
+    # Collect available letters from ALL entries (after search, before letter filter)
+    letters = set()
+    for e in entries:
+        first = e["name"][0].upper() if e["name"] else ""
+        if first and not first.isalpha():
+            letters.add("#")
+        elif first:
+            letters.add(first)
+
+    # Apply letter filter BEFORE pagination so total reflects filtered count
+    if letter:
+        if letter == "#":
+            entries = [e for e in entries if e["name"] and not e["name"][0].isalpha()]
+        else:
+            entries = [e for e in entries if e["name"] and e["name"][0].upper() == letter.upper()]
 
     total = len(entries)
     start = (page - 1) * limit
@@ -74,4 +94,5 @@ def browse():
         "page": page,
         "limit": limit,
         "breadcrumbs": breadcrumbs,
+        "letters": sorted(letters),
     })

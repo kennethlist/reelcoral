@@ -65,7 +65,12 @@ def get_media_info(filepath, config):
                 "bitmap": codec_name in bitmap_codecs,
             })
 
-    profiles = [p["name"] for p in config.get("transcoding", {}).get("profiles", [])]
+    profiles = []
+    for p in config.get("transcoding", {}).get("profiles", []):
+        entry = {"name": p["name"]}
+        if "video_bitrate" in p:
+            entry["video_bitrate"] = p["video_bitrate"]
+        profiles.append(entry)
 
     return {
         "duration": duration,
@@ -79,7 +84,7 @@ def get_media_info(filepath, config):
 @probe_bp.route("/info")
 def info():
     path = request.args.get("path", "")
-    config = current_app.config["KMC"]
+    config = current_app.config["MEDIA"]
     root = config["media"]["root"]
     import os
     filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))

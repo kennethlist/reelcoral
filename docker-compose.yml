@@ -1,17 +1,14 @@
 services:
-  kmc:
+  media:
     build: .
     ports:
       - "8080:8080"
     volumes:
       - ./config.yml:/config/config.yml:ro
       - ./media:/media:ro
-      - kmc-cache:/cache
+      - ./cache:/cache
     devices:
       - /dev/dri:/dev/dri
     tmpfs:
       - /tmp:size=2G
     restart: unless-stopped
-
-volumes:
-  kmc-cache:

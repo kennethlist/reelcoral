@@ -3,6 +3,9 @@ import { useState, useEffect } from "react";
 import Login from "./pages/Login";
 import Browse from "./pages/Browse";
 import Player from "./pages/Player";
+import Gallery from "./pages/Gallery";
+import ThumbnailGen from "./pages/ThumbnailGen";
+import Preferences from "./pages/Preferences";
 import { checkAuth } from "./api";
 
 export default function App() {
@@ -36,6 +39,18 @@ export default function App() {
         <Route
           path="/play"
           element={authed ? <Player /> : <Navigate to="/login" replace />}
+        />
+        <Route
+          path="/gallery"
+          element={authed ? <Gallery /> : <Navigate to="/login" replace />}
+        />
+        <Route
+          path="/preferences"
+          element={authed ? <Preferences /> : <Navigate to="/login" replace />}
+        />
+        <Route
+          path="/thumbnails"
+          element={authed ? <ThumbnailGen /> : <Navigate to="/login" replace />}
         />
         <Route
           path="*"
