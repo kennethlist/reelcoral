@@ -7,6 +7,7 @@ import SearchBar from "../components/SearchBar";
 import Pagination from "../components/Pagination";
 import ThumbnailPicker from "../components/ThumbnailPicker";
 import { useMusicPlayer, type MusicTrack } from "../hooks/useMusicPlayer";
+import { usePreferences } from "../hooks/usePreferences";
 
 function formatSize(bytes?: number): string {
   if (!bytes) return "";
@@ -133,6 +134,10 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const nav = useNavigate();
   const [generateOnFly, setGenerateOnFly] = useState(true);
   const music = useMusicPlayer();
+  const { prefs } = usePreferences();
+  const gridClass = prefs.grid_size === "large"
+    ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4"
+    : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6";
   const currentPath = searchParams.get("path") || "/";
   const currentPage = Number(searchParams.get("page") || "1");
   const currentSearch = searchParams.get("search") || "";
@@ -528,7 +533,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           return hasAlbums ? (
             <>
               {/* Album grid (1:1 square cards with cover art) */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pr-8">
+              <div className={`grid ${gridClass} gap-4 pr-8`}>
                 {data.entries.map((entry) => (
                   <VideoCard
                     key={entry.path}
@@ -604,7 +609,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
               </div>
             )}
             {/* Normal grid for non-music content */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pr-8">
+            <div className={`grid ${gridClass} gap-4 pr-8`}>
               {data.entries.map((entry) => (
                 <div key={entry.path} className="relative group/card">
                   {selectMode && !entry.is_dir && (

@@ -1,13 +1,17 @@
 import os
 import hashlib
 import subprocess
+import warnings
+import logging
 from flask import Blueprint, request, current_app, send_file, jsonify
 from probe import ffprobe
 
 thumbnail_bp = Blueprint("thumbnail", __name__)
+log = logging.getLogger(__name__)
 
 CACHE_DIR = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz"}
 
 
 def cache_path_for(path_hash):
@@ -44,6 +48,159 @@ def _find_first_media(dirpath, video_extensions, image_extensions=IMAGE_EXTS, de
     return None, False
 
 
+def _find_first_book(dirpath, depth=5):
+    """Recursively find the first book file in a directory."""
+    if depth <= 0:
+        return None
+    try:
+        items = sorted(os.listdir(dirpath), key=str.lower)
+    except (PermissionError, OSError):
+        return None
+    for name in items:
+        if name.startswith("."):
+            continue
+        full = os.path.join(dirpath, name)
+        ext = os.path.splitext(name)[1].lower()
+        if os.path.isfile(full) and ext in BOOK_EXTS:
+            return full
+    for name in items:
+        if name.startswith("."):
+            continue
+        full = os.path.join(dirpath, name)
+        if os.path.isdir(full):
+            result = _find_first_book(full, depth - 1)
+            if result:
+                return result
+    return None
+
+
+def _generate_book_thumbnail(book_path, cache_path):
+    """Generate a thumbnail from a book file's cover/first page. Returns True on success."""
+    ext = os.path.splitext(book_path)[1].lower()
+    try:
+        if ext == ".epub":
+            return _generate_epub_thumbnail(book_path, cache_path)
+        elif ext == ".pdf":
+            return _generate_pdf_thumbnail(book_path, cache_path)
+        elif ext in (".cbr", ".cbz"):
+            return _generate_comic_thumbnail(book_path, cache_path)
+    except Exception as e:
+        log.warning("Book thumbnail generation failed for %s: %s", book_path, e)
+    return False
+
+
+def _resize_to_thumb(input_path, output_path):
+    """Resize an image file to thumbnail width using ffmpeg."""
+    cmd = [
+        "ffmpeg", "-i", input_path,
+        "-vf", "scale=320:-1",
+        "-frames:v", "1",
+        "-y", output_path,
+    ]
+    subprocess.run(cmd, capture_output=True, timeout=30)
+    return os.path.exists(output_path)
+
+
+def _generate_epub_thumbnail(epub_path, cache_path):
+    import ebooklib
+    from ebooklib import epub
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        book = epub.read_epub(epub_path)
+
+    cover = None
+    for item in book.get_items_of_type(ebooklib.ITEM_COVER):
+        cover = item
+        break
+    if not cover:
+        for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
+            if "cover" in item.get_name().lower():
+                cover = item
+                break
+    if not cover:
+        images = list(book.get_items_of_type(ebooklib.ITEM_IMAGE))
+        if images:
+            cover = images[0]
+    if not cover:
+        return False
+
+    tmp_path = cache_path + ".tmp"
+    with open(tmp_path, "wb") as f:
+        f.write(cover.get_content())
+    try:
+        return _resize_to_thumb(tmp_path, cache_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _generate_pdf_thumbnail(pdf_path, cache_path):
+    import pymupdf
+    doc = pymupdf.open(pdf_path)
+    if doc.page_count == 0:
+        doc.close()
+        return False
+    pg = doc[0]
+    zoom = 320 / pg.rect.width
+    zoom = max(0.5, min(zoom, 5.0))
+    mat = pymupdf.Matrix(zoom, zoom)
+    pix = pg.get_pixmap(matrix=mat)
+    tmp_path = cache_path + ".tmp.png"
+    pix.save(tmp_path)
+    doc.close()
+    try:
+        return _resize_to_thumb(tmp_path, cache_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _generate_comic_thumbnail(comic_path, cache_path):
+    import re
+    import zipfile
+    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+    def natural_sort_key(s):
+        return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
+
+    ext = os.path.splitext(comic_path)[1].lower()
+    names = []
+    data = None
+
+    if ext == ".cbz":
+        with zipfile.ZipFile(comic_path, "r") as zf:
+            for name in zf.namelist():
+                if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
+                    names.append(name)
+            names.sort(key=natural_sort_key)
+            if not names:
+                return False
+            data = zf.read(names[0])
+    elif ext == ".cbr":
+        import rarfile
+        with rarfile.RarFile(comic_path, "r") as rf:
+            for name in rf.namelist():
+                if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
+                    names.append(name)
+            names.sort(key=natural_sort_key)
+            if not names:
+                return False
+            data = rf.read(names[0])
+
+    if not data:
+        return False
+
+    tmp_path = cache_path + ".tmp"
+    with open(tmp_path, "wb") as f:
+        f.write(data)
+    try:
+        return _resize_to_thumb(tmp_path, cache_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 @thumbnail_bp.route("/thumbnail")
 def thumbnail():
     config = current_app.config["MEDIA"]
@@ -57,13 +214,25 @@ def thumbnail():
 
     # For directories, find the first video or image file recursively
     is_image = False
+    is_book = False
     if os.path.isdir(filepath):
         media_file, is_image = _find_first_media(filepath, extensions)
         if not media_file:
-            return jsonify({"error": "no media found"}), 404
+            # Fall back to first book file
+            media_file = _find_first_book(filepath)
+            if not media_file:
+                return jsonify({"error": "no media found"}), 404
+            is_book = True
+        else:
+            # _find_first_media may return a book file since books are in extensions
+            ext = os.path.splitext(media_file)[1].lower()
+            is_book = ext in BOOK_EXTS
         filepath = media_file
     elif not os.path.isfile(filepath):
         return jsonify({"error": "not found"}), 404
+    else:
+        ext = os.path.splitext(filepath)[1].lower()
+        is_book = ext in BOOK_EXTS
 
     # Check cache (nested path, with fallback to legacy flat path)
     path_hash = hashlib.sha256(filepath.encode()).hexdigest()
@@ -84,6 +253,12 @@ def thumbnail():
         return jsonify({"error": "no thumbnail cached"}), 404
 
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+
+    if is_book:
+        ok = _generate_book_thumbnail(filepath, cache_path)
+        if not ok:
+            return jsonify({"error": "thumbnail generation failed"}), 500
+        return send_file(cache_path, mimetype="image/jpeg")
 
     if is_image:
         # Resize image to thumbnail using FFmpeg

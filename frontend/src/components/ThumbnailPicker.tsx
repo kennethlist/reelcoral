@@ -5,6 +5,7 @@ import {
   uploadCustomThumbnail,
   resetThumbnail,
 } from "../api";
+import { usePreferences } from "../hooks/usePreferences";
 
 interface Props {
   path: string;
@@ -19,12 +20,13 @@ export default function ThumbnailPicker({ path, onClose, onSaved }: Props) {
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const { prefs } = usePreferences();
 
   function loadCandidates() {
     setLoading(true);
     setError("");
     setCandidates([]);
-    getThumbnailCandidates(path)
+    getThumbnailCandidates(path, prefs.thumbnail_candidates)
       .then((data) => setCandidates(data.candidates))
       .catch(() => setError("Failed to generate candidates"))
       .finally(() => setLoading(false));

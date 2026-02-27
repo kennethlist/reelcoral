@@ -5,15 +5,19 @@ import random
 import shutil
 import subprocess
 import time
+import warnings
+import logging
 from flask import Blueprint, request, current_app, jsonify, send_file
 from probe import ffprobe
 from thumbnail import CACHE_DIR, IMAGE_EXTS, _find_first_media, cache_path_for
 
 thumbnail_select_bp = Blueprint("thumbnail_select", __name__)
+log = logging.getLogger(__name__)
 
 OVERRIDES_FILE = os.path.join(os.path.dirname(CACHE_DIR), "thumbnail_overrides.json")
 CANDIDATE_POSITIONS = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 MAX_DIR_SCAN = 5000  # stop scanning after this many files to keep it fast
+BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz"}
 
 
 def _load_overrides():
@@ -30,10 +34,11 @@ def _save_overrides(data):
 
 
 def _collect_media_files(dirpath, video_exts, image_exts=IMAGE_EXTS, depth=5):
-    """Collect media files from a directory, separated into images and videos.
+    """Collect media files from a directory, separated into images, videos, and books.
     Stops after MAX_DIR_SCAN files to stay fast on large directories."""
     images = []
     videos = []
+    books = []
     seen = 0
 
     def _walk(d, remaining_depth):
@@ -54,6 +59,8 @@ def _collect_media_files(dirpath, video_exts, image_exts=IMAGE_EXTS, depth=5):
                 ext = os.path.splitext(name)[1].lower()
                 if ext in image_exts:
                     images.append(full)
+                elif ext in BOOK_EXTS:
+                    books.append(full)
                 elif ext in video_exts:
                     videos.append(full)
             elif os.path.isdir(full):
@@ -66,7 +73,7 @@ def _collect_media_files(dirpath, video_exts, image_exts=IMAGE_EXTS, depth=5):
                 return
 
     _walk(dirpath, depth)
-    return images, videos
+    return images, videos, books
 
 
 def _resolve_path(path):
@@ -80,13 +87,19 @@ def _resolve_path(path):
 
 
 def _resolve_media(filepath, config):
-    """For directories, find the first media file. Returns (media_path, hash, is_image) or (None, None, False)."""
+    """For directories, find the first media or book file. Returns (media_path, hash, is_image) or (None, None, False)."""
     extensions = set(config["media"].get("extensions", []))
     from thumbnail import IMAGE_EXTS
     if os.path.isdir(filepath):
         media_file, is_image = _find_first_media(filepath, extensions)
         if not media_file:
-            return None, None, False
+            # Fall back to first book file
+            book_file = _find_first_book(filepath)
+            if not book_file:
+                return None, None, False
+            media_path = book_file
+            path_hash = hashlib.sha256(media_path.encode()).hexdigest()
+            return media_path, path_hash, False
         media_path = media_file
     else:
         ext = os.path.splitext(filepath)[1].lower()
@@ -125,11 +138,157 @@ def _generate_image_thumb(image_path, candidate_path):
     return os.path.exists(candidate_path)
 
 
+def _generate_book_thumb(book_path, candidate_path):
+    """Extract a cover/first-page thumbnail from a book file and save as jpg."""
+    ext = os.path.splitext(book_path)[1].lower()
+    try:
+        if ext == ".epub":
+            return _generate_epub_thumb(book_path, candidate_path)
+        elif ext == ".pdf":
+            return _generate_pdf_thumb(book_path, candidate_path)
+        elif ext in (".cbr", ".cbz"):
+            return _generate_comic_thumb(book_path, candidate_path)
+    except Exception as e:
+        log.warning("Book thumbnail generation failed for %s: %s", book_path, e)
+    return False
+
+
+def _generate_epub_thumb(epub_path, candidate_path):
+    """Extract epub cover image and resize to thumbnail."""
+    import ebooklib
+    from ebooklib import epub as epub_lib
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        book = epub_lib.read_epub(epub_path)
+
+    cover = None
+    for item in book.get_items_of_type(ebooklib.ITEM_COVER):
+        cover = item
+        break
+    if not cover:
+        for item in book.get_items_of_type(ebooklib.ITEM_IMAGE):
+            if "cover" in item.get_name().lower():
+                cover = item
+                break
+    if not cover:
+        images = list(book.get_items_of_type(ebooklib.ITEM_IMAGE))
+        if images:
+            cover = images[0]
+    if not cover:
+        return False
+
+    # Write cover to temp file, then resize with ffmpeg
+    tmp_path = candidate_path + ".tmp"
+    with open(tmp_path, "wb") as f:
+        f.write(cover.get_content())
+    try:
+        return _generate_image_thumb(tmp_path, candidate_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _generate_pdf_thumb(pdf_path, candidate_path):
+    """Render PDF first page to thumbnail."""
+    import pymupdf
+    doc = pymupdf.open(pdf_path)
+    if doc.page_count == 0:
+        doc.close()
+        return False
+    pg = doc[0]
+    zoom = 320 / pg.rect.width
+    zoom = max(0.5, min(zoom, 5.0))
+    mat = pymupdf.Matrix(zoom, zoom)
+    pix = pg.get_pixmap(matrix=mat)
+    # Save as png temp, then convert to jpg via ffmpeg for consistency
+    tmp_path = candidate_path + ".tmp.png"
+    pix.save(tmp_path)
+    doc.close()
+    try:
+        return _generate_image_thumb(tmp_path, candidate_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _generate_comic_thumb(comic_path, candidate_path):
+    """Extract first page from comic archive and resize to thumbnail."""
+    import zipfile
+    import re as re_mod
+
+    ext = os.path.splitext(comic_path)[1].lower()
+    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+    def natural_sort_key(s):
+        return [int(c) if c.isdigit() else c.lower() for c in re_mod.split(r'(\d+)', s)]
+
+    names = []
+    if ext == ".cbz":
+        with zipfile.ZipFile(comic_path, "r") as zf:
+            for name in zf.namelist():
+                if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
+                    names.append(name)
+            names.sort(key=natural_sort_key)
+            if not names:
+                return False
+            data = zf.read(names[0])
+    elif ext == ".cbr":
+        import rarfile
+        with rarfile.RarFile(comic_path, "r") as rf:
+            for name in rf.namelist():
+                if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
+                    names.append(name)
+            names.sort(key=natural_sort_key)
+            if not names:
+                return False
+            data = rf.read(names[0])
+    else:
+        return False
+
+    tmp_path = candidate_path + ".tmp"
+    with open(tmp_path, "wb") as f:
+        f.write(data)
+    try:
+        return _generate_image_thumb(tmp_path, candidate_path)
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+def _find_first_book(dirpath, depth=5):
+    """Recursively find the first book file in a directory."""
+    if depth <= 0:
+        return None
+    try:
+        items = sorted(os.listdir(dirpath), key=str.lower)
+    except (PermissionError, OSError):
+        return None
+    for name in items:
+        if name.startswith("."):
+            continue
+        full = os.path.join(dirpath, name)
+        ext = os.path.splitext(name)[1].lower()
+        if os.path.isfile(full) and ext in BOOK_EXTS:
+            return full
+    for name in items:
+        if name.startswith("."):
+            continue
+        full = os.path.join(dirpath, name)
+        if os.path.isdir(full):
+            result = _find_first_book(full, depth - 1)
+            if result:
+                return result
+    return None
+
+
 @thumbnail_select_bp.route("/thumbnail/candidates")
 def candidates():
     path = request.args.get("path", "")
     if not path:
         return jsonify({"error": "path required"}), 400
+
+    count = min(9, max(1, int(request.args.get("count", 3))))
 
     filepath, config = _resolve_path(path)
     if not filepath:
@@ -143,20 +302,21 @@ def candidates():
     ts = int(time.time() * 1000)
 
     if os.path.isdir(filepath):
-        # Directory: pick up to 3 random images + 3 random videos
-        images, videos = _collect_media_files(filepath, extensions)
-        sample_images = random.sample(images, min(3, len(images)))
-        sample_videos = random.sample(videos, min(3, len(videos)))
-        sampled = [(f, True) for f in sample_images] + [(f, False) for f in sample_videos]
+        # Directory: collect all media, then pick random candidates
+        images, videos, books = _collect_media_files(filepath, extensions)
+        pool = [(f, "image") for f in images] + [(f, "video") for f in videos] + [(f, "book") for f in books]
+        sampled = random.sample(pool, min(count, len(pool)))
 
         if not sampled:
             return jsonify({"candidates": []})
 
         urls = []
-        for i, (media_file, is_img) in enumerate(sampled):
+        for i, (media_file, kind) in enumerate(sampled):
             candidate_path = os.path.join(CACHE_DIR, f"{browse_hash}_candidate_{i}.jpg")
-            if is_img:
+            if kind == "image":
                 _generate_image_thumb(media_file, candidate_path)
+            elif kind == "book":
+                _generate_book_thumb(media_file, candidate_path)
             else:
                 _generate_video_frame(media_file, candidate_path, random.choice(CANDIDATE_POSITIONS))
             if os.path.exists(candidate_path):
@@ -168,10 +328,14 @@ def candidates():
 
     else:
         # Single file: one candidate
-        is_image = os.path.splitext(filepath)[1].lower() in IMAGE_EXTS
+        ext = os.path.splitext(filepath)[1].lower()
+        is_image = ext in IMAGE_EXTS
+        is_book = ext in BOOK_EXTS
         candidate_path = os.path.join(CACHE_DIR, f"{browse_hash}_candidate_0.jpg")
         if is_image:
             _generate_image_thumb(filepath, candidate_path)
+        elif is_book:
+            _generate_book_thumb(filepath, candidate_path)
         else:
             pos = random.choice(CANDIDATE_POSITIONS)
             _generate_video_frame(filepath, candidate_path, pos)

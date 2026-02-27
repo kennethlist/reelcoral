@@ -31,8 +31,6 @@ export interface BrowseEntry {
   is_markdown?: boolean;
   is_album?: boolean;
   cover_art?: string;
-  first_book?: string;
-  first_book_type?: "ebook" | "comic" | "pdf";
   size?: number;
   mtime?: number;
 }
@@ -145,11 +143,12 @@ export async function stopStream(sessionId: string): Promise<void> {
 }
 
 export async function getThumbnailCandidates(
-  path: string
+  path: string,
+  count?: number
 ): Promise<{ candidates: (string | null)[] }> {
-  const res = await fetch(
-    `/api/thumbnail/candidates?path=${encodeURIComponent(path)}&_t=${Date.now()}`
-  );
+  const params = new URLSearchParams({ path, _t: String(Date.now()) });
+  if (count) params.set("count", String(count));
+  const res = await fetch(`/api/thumbnail/candidates?${params}`);
   if (!res.ok) throw new Error("Failed to get candidates");
   return res.json();
 }

@@ -114,6 +114,34 @@ export default function Preferences() {
             </>
           )}
         </div>
+
+        <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide pt-4">Browse</h2>
+        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-gray-400 shrink-0">Thumbnail Candidates</span>
+            <select
+              value={prefs.thumbnail_candidates}
+              onChange={(e) => setPrefs({ thumbnail_candidates: Number(e.target.value) as 3 | 6 | 9 })}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+            >
+              <option value={3}>3</option>
+              <option value={6}>6</option>
+              <option value={9}>9</option>
+            </select>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm text-gray-400 shrink-0">Grid Size</span>
+            <select
+              value={prefs.grid_size}
+              onChange={(e) => setPrefs({ grid_size: e.target.value as "small" | "large" })}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-200 focus:outline-none focus:border-blue-500"
+            >
+              <option value="small">Small (more columns)</option>
+              <option value="large">Large (fewer columns)</option>
+            </select>
+          </div>
+        </div>
       </main>
     </div>
   );

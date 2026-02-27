@@ -1183,7 +1183,7 @@ export default function Reader() {
         .epub-content img { max-width: 100%; height: auto; max-height: var(--epub-page-height, none); object-fit: contain; break-inside: avoid; }
         .epub-content h1, .epub-content h2, .epub-content h3 { margin: 1em 0 0.5em; }
         .epub-content p { margin: 0.5em 0; }
-        .epub-content a { color: #60a5fa; text-decoration: underline; }
+        .epub-content a { color: inherit; text-decoration: none; pointer-events: none; }
         .epub-content hr.epub-chapter-break { border: none; margin: 2em 0; break-before: column; }
         .markdown-content h1 { font-size: 2em; font-weight: bold; margin: 0.67em 0; border-bottom: 1px solid currentColor; padding-bottom: 0.3em; opacity: 0.9; }
         .markdown-content h2 { font-size: 1.5em; font-weight: bold; margin: 0.83em 0; border-bottom: 1px solid currentColor; padding-bottom: 0.2em; opacity: 0.8; }

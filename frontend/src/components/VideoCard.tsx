@@ -81,21 +81,11 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
     thumbUrl = null; // No server-side thumbnail for markdown
   } else if (entry.name.toLowerCase().endsWith(".pdf")) {
     thumbUrl = `/api/pdf/page?path=${encodeURIComponent(entry.path)}&page=0&fit=width&width=320&height=480`;
-  } else if (entry.is_dir && entry.first_book) {
-    // Directory containing books — use first book's cover as thumbnail
-    if (entry.first_book_type === "ebook") {
-      thumbUrl = `/api/ebook/cover?path=${encodeURIComponent(entry.first_book)}`;
-    } else if (entry.first_book_type === "comic") {
-      thumbUrl = `/api/comic/page?path=${encodeURIComponent(entry.first_book)}&page=0`;
-    } else if (entry.first_book_type === "pdf") {
-      thumbUrl = `/api/pdf/page?path=${encodeURIComponent(entry.first_book)}&page=0&fit=width&width=320&height=480`;
-    }
   } else {
     thumbUrl = `/api/thumbnail?path=${encodeURIComponent(entry.path)}${thumbVersion ? `&v=${thumbVersion}` : ""}${genParam}`;
   }
 
-  const hasBookCover = entry.is_dir && entry.first_book;
-  const isBookFormat = !musicMode && (entry.is_ebook || entry.is_comic || entry.is_markdown || entry.name.toLowerCase().endsWith(".pdf") || hasBookCover);
+  const isBookFormat = !musicMode && !entry.is_dir && (entry.is_ebook || entry.is_comic || entry.is_markdown || entry.name.toLowerCase().endsWith(".pdf"));
   const aspectClass = musicMode ? "aspect-square" : isBookFormat ? "aspect-[2/3]" : "aspect-video";
 
   return (

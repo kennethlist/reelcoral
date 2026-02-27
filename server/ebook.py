@@ -154,6 +154,18 @@ def ebook_chapter():
     html = re.sub(r"src='([^']+)'", r'src="\1"', html)
     html = re.sub(r'src="([^"]+)"', replace_image_src, html)
 
+    # Sanitize: remove script tags and their contents
+    html = re.sub(r'<script\b[^>]*>.*?</script>', '', html, flags=re.DOTALL | re.IGNORECASE)
+    html = re.sub(r'<script\b[^>]*/>', '', html, flags=re.IGNORECASE)
+    # Remove event handler attributes (on*)
+    html = re.sub(r'\s+on\w+\s*=\s*"[^"]*"', '', html, flags=re.IGNORECASE)
+    html = re.sub(r"\s+on\w+\s*=\s*'[^']*'", '', html, flags=re.IGNORECASE)
+    # Remove javascript: hrefs
+    html = re.sub(r'href\s*=\s*"javascript:[^"]*"', 'href="#"', html, flags=re.IGNORECASE)
+    html = re.sub(r"href\s*=\s*'javascript:[^']*'", "href='#'", html, flags=re.IGNORECASE)
+    # Unwrap <a> tags — keep inner content, remove the link wrapper
+    html = re.sub(r'<a\b[^>]*>(.*?)</a>', r'\1', html, flags=re.DOTALL | re.IGNORECASE)
+
     return jsonify({"html": html, "index": index})
 
 

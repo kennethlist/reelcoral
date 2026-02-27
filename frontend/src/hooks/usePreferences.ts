@@ -10,6 +10,8 @@ export interface Preferences {
   subtitles_enabled: boolean;
   subtitle_mode: "burn" | "external";
   subtitle_font_size: SubtitleFontSize;
+  thumbnail_candidates: 3 | 6 | 9;
+  grid_size: "small" | "large";
 }
 
 const STORAGE_KEY = "media_preferences";
@@ -21,6 +23,8 @@ const hardcodedDefaults: Preferences = {
   subtitles_enabled: true,
   subtitle_mode: "external",
   subtitle_font_size: "medium",
+  thumbnail_candidates: 3,
+  grid_size: "small",
 };
 
 function load(defaults: Preferences): Preferences {
@@ -44,6 +48,8 @@ export function usePreferences() {
           subtitles_enabled: cfg.defaults.subtitles_enabled,
           subtitle_mode: cfg.defaults.subtitle_mode as "burn" | "external",
           subtitle_font_size: "medium",
+          thumbnail_candidates: 3,
+          grid_size: "small",
         };
         // Re-load: localStorage overrides take precedence over server defaults
         setPrefsState(load(serverDefaults));
