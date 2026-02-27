@@ -207,6 +207,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     if (activeLetter) params.letter = activeLetter;
     addSortParams(params);
     setSearchParams(params);
+    window.scrollTo({ top: 0 });
   }
 
   function handleSortChange(sort: string, dir: string) {
