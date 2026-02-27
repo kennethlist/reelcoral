@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     intel-media-va-driver-non-free \
     vainfo \
+    unrar \
     && rm -rf /var/lib/apt/lists/*
 
 # Python dependencies

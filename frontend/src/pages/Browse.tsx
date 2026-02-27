@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, logout, getConfig, BrowseResult, BrowseEntry } from "../api";
+import { browse, logout, getConfig, BrowseResult, BrowseEntry, downloadUrl, downloadBulk } from "../api";
 import VideoCard from "../components/VideoCard";
 import Breadcrumbs from "../components/Breadcrumbs";
 import SearchBar from "../components/SearchBar";
@@ -144,6 +144,9 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const [error, setError] = useState("");
   const [editingThumbnail, setEditingThumbnail] = useState<string | null>(null);
   const [thumbVersion, setThumbVersion] = useState(0);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [downloading, setDownloading] = useState(false);
 
   // Compute parent path for back button
   const parentPath = useMemo(() => {
@@ -187,6 +190,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   function navigate(path: string) {
     saveDirState(currentPath, currentDirState());
     saveScrollPos(currentPath, window.scrollY);
+    setSelectMode(false);
+    setSelected(new Set());
     const params: Record<string, string> = { path };
     addSortParams(params);
     setSearchParams(params);
@@ -268,6 +273,43 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     } catch {}
   }, [music]);
 
+  function toggleSelect(path: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    if (!data) return;
+    const files = data.entries.filter((e) => !e.is_dir);
+    if (selected.size === files.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(files.map((e) => e.path)));
+    }
+  }
+
+  async function handleBulkDownload() {
+    if (selected.size === 0) return;
+    setDownloading(true);
+    try {
+      const blob = await downloadBulk(Array.from(selected));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "download.zip";
+      a.click();
+      URL.revokeObjectURL(url);
+      setSelectMode(false);
+      setSelected(new Set());
+    } catch {} finally {
+      setDownloading(false);
+    }
+  }
+
   function handleEntryClick(entry: BrowseEntry) {
     if (entry.is_dir) {
       navigate(entry.path);
@@ -288,6 +330,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         nav(`/gallery?path=${encodeURIComponent(entry.path)}`);
       } else if (entry.is_audio) {
         nav(`/audio?path=${encodeURIComponent(entry.path)}`);
+      } else if (entry.is_ebook || entry.is_comic || entry.is_markdown) {
+        nav(`/read?path=${encodeURIComponent(entry.path)}`);
       } else {
         nav(`/play?path=${encodeURIComponent(entry.path)}`);
       }
@@ -347,6 +391,14 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
             <div className="h-5" />
           )}
           <div className="flex items-center gap-2 mr-6">
+            {!data?.is_music_folder && !data?.is_music_context && (
+              <button
+                onClick={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
+                className={`text-xs px-2 py-1 rounded transition-colors cursor-pointer mr-2 ${selectMode ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
+              >
+                {selectMode ? "Cancel" : "Select"}
+              </button>
+            )}
             <span className="text-xs text-gray-500">Sort</span>
             <select
               value={currentSort}
@@ -527,17 +579,72 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
         {data && data.entries.length > 0 && !data.is_music_folder && !data.is_music_context && (
           <>
+            {/* Select mode bar */}
+            {selectMode && (
+              <div className="flex items-center gap-3 mb-4 px-2 py-2 bg-gray-900 rounded-lg mr-8">
+                <button
+                  onClick={toggleSelectAll}
+                  className="text-xs px-3 py-1 rounded bg-gray-800 text-gray-300 hover:text-white transition-colors cursor-pointer"
+                >
+                  {selected.size === data.entries.filter((e) => !e.is_dir).length ? "Deselect All" : "Select All"}
+                </button>
+                <span className="text-xs text-gray-400">{selected.size} selected</span>
+                <div className="flex-1" />
+                <button
+                  onClick={handleBulkDownload}
+                  disabled={selected.size === 0 || downloading}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 transition-colors cursor-pointer"
+                >
+                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12l7 7 7-7" />
+                    <path strokeLinecap="round" d="M5 20h14" />
+                  </svg>
+                  {downloading ? "Downloading..." : "Download"}
+                </button>
+              </div>
+            )}
             {/* Normal grid for non-music content */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pr-8">
               {data.entries.map((entry) => (
-                <VideoCard
-                  key={entry.path}
-                  entry={entry}
-                  onClick={() => handleEntryClick(entry)}
-                  onEditThumbnail={() => setEditingThumbnail(entry.path)}
-                  thumbVersion={thumbVersion}
-                  generateOnFly={generateOnFly}
-                />
+                <div key={entry.path} className="relative group/card">
+                  {selectMode && !entry.is_dir && (
+                    <div
+                      onClick={(e) => { e.stopPropagation(); toggleSelect(entry.path); }}
+                      className="absolute top-2 left-2 z-10 cursor-pointer"
+                    >
+                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
+                        selected.has(entry.path) ? "bg-blue-600 border-blue-600" : "border-gray-400 bg-black/40"
+                      }`}>
+                        {selected.has(entry.path) && (
+                          <svg className="w-3 h-3 text-white" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                          </svg>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  {/* Per-file download button (hover) */}
+                  {!selectMode && !entry.is_dir && (
+                    <a
+                      href={downloadUrl(entry.path)}
+                      onClick={(e) => e.stopPropagation()}
+                      className="absolute top-2 right-2 z-10 bg-black/60 hover:bg-black/80 rounded p-1 opacity-0 group-hover/card:opacity-100 transition-opacity cursor-pointer"
+                      title="Download"
+                    >
+                      <svg className="w-4 h-4 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12l7 7 7-7" />
+                        <path strokeLinecap="round" d="M5 20h14" />
+                      </svg>
+                    </a>
+                  )}
+                  <VideoCard
+                    entry={entry}
+                    onClick={() => selectMode && !entry.is_dir ? toggleSelect(entry.path) : handleEntryClick(entry)}
+                    onEditThumbnail={selectMode ? undefined : () => setEditingThumbnail(entry.path)}
+                    thumbVersion={thumbVersion}
+                    generateOnFly={generateOnFly}
+                  />
+                </div>
               ))}
             </div>
             <Pagination

@@ -29,6 +29,11 @@ def create_app():
     from audio import audio_bp
     from thumbnail_select import thumbnail_select_bp
     from thumbnail_gen import thumbnail_gen_bp
+    from ebook import ebook_bp
+    from comic import comic_bp
+    from pdf import pdf_bp
+    from download import download_bp
+    from markdown_view import markdown_bp
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(browse_bp, url_prefix="/api")
@@ -40,6 +45,11 @@ def create_app():
     app.register_blueprint(image_bp, url_prefix="/api")
     app.register_blueprint(audio_bp, url_prefix="/api")
     app.register_blueprint(thumbnail_gen_bp, url_prefix="/api/thumbnails")
+    app.register_blueprint(ebook_bp, url_prefix="/api/ebook")
+    app.register_blueprint(comic_bp, url_prefix="/api/comic")
+    app.register_blueprint(pdf_bp, url_prefix="/api/pdf")
+    app.register_blueprint(download_bp, url_prefix="/api")
+    app.register_blueprint(markdown_bp, url_prefix="/api/markdown")
 
     frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 

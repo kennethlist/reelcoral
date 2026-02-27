@@ -5,6 +5,9 @@ browse_bp = Blueprint("browse", __name__)
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 AUDIO_EXTS = {".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus"}
+EBOOK_EXTS = {".epub"}
+COMIC_EXTS = {".cbr", ".cbz"}
+MARKDOWN_EXTS = {".md"}
 COVER_ART_NAMES = {"cover.jpg", "folder.jpg", "front.jpg", "album.jpg", "art.jpg",
                    "cover.png", "folder.png", "front.png", "album.png", "art.png"}
 
@@ -95,6 +98,9 @@ def browse():
         if not is_dir:
             entry["is_image"] = ext in IMAGE_EXTS
             entry["is_audio"] = ext in AUDIO_EXTS
+            entry["is_ebook"] = ext in EBOOK_EXTS
+            entry["is_comic"] = ext in COMIC_EXTS
+            entry["is_markdown"] = ext in MARKDOWN_EXTS
             if ext in AUDIO_EXTS:
                 has_audio_files = True
             try:

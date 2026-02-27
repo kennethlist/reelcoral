@@ -4,7 +4,7 @@ server:
 
 media:
   root: "/media"
-  extensions: [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".wmv", ".flv", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus"]
+  extensions: [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".wmv", ".flv", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus", ".epub", ".pdf", ".cbr", ".cbz", ".md"]
   music_folders: ["/music"]
 
 transcoding:

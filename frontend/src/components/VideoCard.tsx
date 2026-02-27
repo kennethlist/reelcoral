@@ -73,11 +73,20 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
     }
   } else if (entry.is_image) {
     thumbUrl = `/api/image?path=${encodeURIComponent(entry.path)}`;
+  } else if (entry.is_ebook) {
+    thumbUrl = `/api/ebook/cover?path=${encodeURIComponent(entry.path)}`;
+  } else if (entry.is_comic) {
+    thumbUrl = `/api/comic/page?path=${encodeURIComponent(entry.path)}&page=0`;
+  } else if (entry.is_markdown) {
+    thumbUrl = null; // No server-side thumbnail for markdown
+  } else if (entry.name.toLowerCase().endsWith(".pdf")) {
+    thumbUrl = `/api/pdf/page?path=${encodeURIComponent(entry.path)}&page=0&fit=width&width=320&height=480`;
   } else {
     thumbUrl = `/api/thumbnail?path=${encodeURIComponent(entry.path)}${thumbVersion ? `&v=${thumbVersion}` : ""}${genParam}`;
   }
 
-  const aspectClass = musicMode ? "aspect-square" : "aspect-video";
+  const isBookFormat = !musicMode && (entry.is_ebook || entry.is_comic || entry.is_markdown || entry.name.toLowerCase().endsWith(".pdf"));
+  const aspectClass = musicMode ? "aspect-square" : isBookFormat ? "aspect-[2/3]" : "aspect-video";
 
   return (
     <button
@@ -111,6 +120,11 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
             <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
           </svg>
         )}
+        {!musicMode && !entry.is_dir && isBookFormat && (thumbFailed || !thumbUrl) && (
+          <svg className="w-12 h-12 text-blue-400 drop-shadow-lg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 2a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5zM8 12h8v1.5H8V12zm0 3h8v1.5H8V15z"/>
+          </svg>
+        )}
         {!musicMode && entry.is_dir && !thumbFailed && (
           <div className="absolute bottom-1 right-1 bg-black/60 rounded p-0.5">
             <svg className="w-4 h-4 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
@@ -124,7 +138,7 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
               e.stopPropagation();
               onEditThumbnail();
             }}
-            className="absolute top-1 right-1 bg-black/60 hover:bg-black/80 rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
+            className="absolute top-1 left-1 bg-black/60 hover:bg-black/80 rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
           >
             <svg className="w-4 h-4 text-gray-300" viewBox="0 0 20 20" fill="currentColor">
               <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />

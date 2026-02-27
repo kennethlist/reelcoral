@@ -5,6 +5,7 @@ import Browse from "./pages/Browse";
 import Player from "./pages/Player";
 import AudioPlayer from "./pages/AudioPlayer";
 import Gallery from "./pages/Gallery";
+import Reader from "./pages/Reader";
 import ThumbnailGen from "./pages/ThumbnailGen";
 import Preferences from "./pages/Preferences";
 import { checkAuth } from "./api";
@@ -51,6 +52,10 @@ export default function App() {
           <Route
             path="/gallery"
             element={authed ? <Gallery /> : <Navigate to="/login" replace />}
+          />
+          <Route
+            path="/read"
+            element={authed ? <Reader /> : <Navigate to="/login" replace />}
           />
           <Route
             path="/preferences"

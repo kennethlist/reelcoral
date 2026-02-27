@@ -102,10 +102,14 @@ export default function AudioPlayer() {
     const nextIdx = siblingIndex + delta;
     if (nextIdx < 0 || nextIdx >= siblings.length) return;
     const entry = siblings[nextIdx];
+    const ext = "." + entry.name.split(".").pop()?.toLowerCase();
+    const readerExts = new Set([".epub", ".pdf", ".cbr", ".cbz", ".md"]);
     if (entry.is_image) {
       navigate(`/gallery?path=${encodeURIComponent(entry.path)}`, { replace: true });
     } else if (entry.is_audio) {
       navigate(`/audio?path=${encodeURIComponent(entry.path)}`, { replace: true });
+    } else if (entry.is_ebook || entry.is_comic || entry.is_markdown || readerExts.has(ext)) {
+      navigate(`/read?path=${encodeURIComponent(entry.path)}`, { replace: true });
     } else {
       navigate(`/play?path=${encodeURIComponent(entry.path)}`, { replace: true });
     }

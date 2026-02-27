@@ -26,6 +26,9 @@ export interface BrowseEntry {
   is_dir: boolean;
   is_image?: boolean;
   is_audio?: boolean;
+  is_ebook?: boolean;
+  is_comic?: boolean;
+  is_markdown?: boolean;
   is_album?: boolean;
   cover_art?: string;
   size?: number;
@@ -282,4 +285,83 @@ export async function deleteAllThumbnails(): Promise<{ deleted: number; failed: 
 
 export function audioUrl(path: string, profile = "Original"): string {
   return `/api/audio?path=${encodeURIComponent(path)}&profile=${encodeURIComponent(profile)}`;
+}
+
+// Ebook API
+export interface EbookInfo {
+  title: string;
+  author: string;
+  chapters: { id: string; title: string }[];
+  chapter_count: number;
+  toc: { title: string; href: string }[];
+}
+
+export async function getEbookInfo(path: string): Promise<EbookInfo> {
+  const res = await fetch(`/api/ebook/info?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error("Ebook info failed");
+  return res.json();
+}
+
+export async function getEbookChapter(path: string, index: number): Promise<{ html: string; index: number }> {
+  const res = await fetch(`/api/ebook/chapter?path=${encodeURIComponent(path)}&index=${index}`);
+  if (!res.ok) throw new Error("Ebook chapter failed");
+  return res.json();
+}
+
+export function ebookCoverUrl(path: string): string {
+  return `/api/ebook/cover?path=${encodeURIComponent(path)}`;
+}
+
+// Comic API
+export interface ComicInfo {
+  page_count: number;
+}
+
+export async function getComicInfo(path: string): Promise<ComicInfo> {
+  const res = await fetch(`/api/comic/info?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error("Comic info failed");
+  return res.json();
+}
+
+export function comicPageUrl(path: string, page: number): string {
+  return `/api/comic/page?path=${encodeURIComponent(path)}&page=${page}`;
+}
+
+// PDF API
+export interface PdfInfo {
+  page_count: number;
+  title: string;
+  author: string;
+}
+
+export async function getPdfInfo(path: string): Promise<PdfInfo> {
+  const res = await fetch(`/api/pdf/info?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error("PDF info failed");
+  return res.json();
+}
+
+export function pdfPageUrl(path: string, page: number, fit = "width", width = 1200, height = 1600): string {
+  return `/api/pdf/page?path=${encodeURIComponent(path)}&page=${page}&fit=${fit}&width=${width}&height=${height}`;
+}
+
+// Markdown API
+export async function getMarkdownContent(path: string): Promise<{ html: string }> {
+  const res = await fetch(`/api/markdown/content?path=${encodeURIComponent(path)}`);
+  if (!res.ok) throw new Error("Markdown content failed");
+  return res.json();
+}
+
+// Download API
+export function downloadUrl(path: string): string {
+  return `/api/download?path=${encodeURIComponent(path)}`;
+}
+
+export async function downloadBulk(paths: string[]): Promise<Blob> {
+  const res = await fetch("/api/download/bulk", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  });
+  if (!res.ok) throw new Error("Bulk download failed");
+  return res.blob();
 }
