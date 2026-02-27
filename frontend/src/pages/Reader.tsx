@@ -1093,6 +1093,7 @@ export default function Reader() {
     <div
       ref={containerRef}
       className={`fixed inset-0 bg-gray-950 flex flex-col select-none ${!isTouch && !controlsVisible ? "cursor-none" : ""}`}
+      style={{ touchAction: "manipulation" }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onTouchStart={handleTouchStart}
@@ -1196,6 +1197,7 @@ export default function Reader() {
             <div className="flex items-center justify-between">
               <button
                 onClick={() => (window as any).__readerNav?.(-1)}
+                onPointerDown={(e) => { if (e.pointerType === "touch") { e.preventDefault(); (window as any).__readerNav?.(-1); } }}
                 className="text-white/80 hover:text-white p-2 cursor-pointer"
                 title="Previous page"
               >
@@ -1235,6 +1237,7 @@ export default function Reader() {
               )}
               <button
                 onClick={() => (window as any).__readerNav?.(1)}
+                onPointerDown={(e) => { if (e.pointerType === "touch") { e.preventDefault(); (window as any).__readerNav?.(1); } }}
                 className="text-white/80 hover:text-white p-2 cursor-pointer"
                 title="Next page"
               >

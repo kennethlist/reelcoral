@@ -211,14 +211,14 @@ export default function Gallery() {
       {/* Top bar */}
       <div
         data-controls
-        className={`absolute top-0 left-0 right-0 z-10 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        className={`absolute top-0 left-0 right-0 z-10 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+0.5rem))] bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <button
             onClick={goBack}
-            className="text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer"
+            className="text-white/80 hover:text-white transition-colors shrink-0 cursor-pointer"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
           </button>

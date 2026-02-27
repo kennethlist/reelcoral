@@ -166,6 +166,23 @@ def ebook_chapter():
     # Unwrap <a> tags — keep inner content, remove the link wrapper
     html = re.sub(r'<a\b[^>]*>(.*?)</a>', r'\1', html, flags=re.DOTALL | re.IGNORECASE)
 
+    # Scope <style> tags to .epub-content so EPUB CSS doesn't leak to the overlay/controls.
+    # Remove @font-face and @import (reference unavailable embedded resources).
+    def _scope_style(m):
+        css = m.group(1)
+        css = re.sub(r'@font-face\s*\{[^}]*\}', '', css, flags=re.DOTALL | re.IGNORECASE)
+        css = re.sub(r'@import\s+[^;]+;', '', css, flags=re.IGNORECASE)
+        css = css.strip()
+        if not css:
+            return ''
+        return '<style>.epub-content { ' + css + ' }</style>'
+    html = re.sub(r'<style[^>]*>(.*?)</style>', _scope_style, html, flags=re.DOTALL | re.IGNORECASE)
+
+    # Remove <link> tags (reference EPUB-internal stylesheets that aren't served)
+    html = re.sub(r'<link\b[^>]*/?\s*>', '', html, flags=re.IGNORECASE)
+    # Strip structural HTML tags (meaningless inside a div)
+    html = re.sub(r'</?(?:html|head|body|meta)\b[^>]*>', '', html, flags=re.IGNORECASE)
+
     return jsonify({"html": html, "index": index})
 
 
