@@ -71,6 +71,7 @@ interface ReaderSettings {
   epubBg: "dark" | "light" | "amber";
   epubFontFamily: string;
   epubFontWeight: number;
+  epubLineHeight: number;
   showEpubPages: boolean;
   // PDF
   pdfFit: "width" | "height" | "page";
@@ -84,6 +85,7 @@ const defaultSettings: ReaderSettings = {
   epubBg: "dark",
   epubFontFamily: "Ubuntu",
   epubFontWeight: 400,
+  epubLineHeight: 1.7,
   showEpubPages: true,
   pdfFit: "width",
   navMode: "page",
@@ -235,7 +237,7 @@ function EpubReader({
     if (loading || settings.navMode !== "page") return;
     const t = setTimeout(measureSize, 50);
     return () => clearTimeout(t);
-  }, [html, loading, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.navMode, measureSize]);
+  }, [html, loading, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, settings.navMode, measureSize]);
 
   // Recount pages after contentWidth/contentHeight changes or content changes.
   // Use rAF so the browser has applied the column CSS before we measure.
@@ -243,7 +245,7 @@ function EpubReader({
     if (loading || settings.navMode !== "page" || contentWidth <= 0) return;
     const id = requestAnimationFrame(() => countPages());
     return () => cancelAnimationFrame(id);
-  }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, countPages]);
+  }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, countPages]);
 
   // Window resize listener — recalculate page dimensions on any resize
   useEffect(() => {
@@ -350,7 +352,7 @@ function EpubReader({
           fontSize: `${settings.epubFontSize}px`,
           fontFamily: settings.epubFontFamily,
           fontWeight: settings.epubFontWeight,
-          lineHeight: 1.7,
+          lineHeight: settings.epubLineHeight,
           ...(isPageFlip ? { maxWidth: "56rem", margin: "0 auto", width: "100%" } : {}),
         }}
         onScroll={handleScroll}
@@ -613,7 +615,7 @@ function MarkdownReader({
           fontSize: `${settings.epubFontSize}px`,
           fontFamily: settings.epubFontFamily,
           fontWeight: settings.epubFontWeight,
-          lineHeight: 1.7,
+          lineHeight: settings.epubLineHeight,
         }}
         onScroll={handleScroll}
       >
@@ -725,6 +727,18 @@ function SettingsPanel({
               />
             </div>
             <div>
+              <label className="text-xs text-gray-400 mb-1 block">Line Height: {settings.epubLineHeight.toFixed(1)}</label>
+              <input
+                type="range"
+                min={1.0}
+                max={3.0}
+                step={0.1}
+                value={settings.epubLineHeight}
+                onChange={(e) => update({ epubLineHeight: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+            <div>
               <label className="text-xs text-gray-400 mb-1 block">Margin</label>
               <div className="flex gap-2">
                 {(["small", "medium", "large"] as const).map((m) => (
@@ -832,6 +846,7 @@ export default function Reader() {
       const updates: Partial<ReaderSettings> = {};
       if (!parsed.epubFontFamily && cfg.defaults.book_font) updates.epubFontFamily = cfg.defaults.book_font;
       if (!parsed.epubFontWeight && cfg.defaults.book_font_weight) updates.epubFontWeight = cfg.defaults.book_font_weight;
+      if (!parsed.epubLineHeight && cfg.defaults.book_line_height) updates.epubLineHeight = cfg.defaults.book_line_height;
       if (Object.keys(updates).length > 0) {
         setSettings((prev) => ({ ...prev, ...updates }));
       }
@@ -955,37 +970,52 @@ export default function Reader() {
     }
   }, [pageInputFocused]);
 
-  // Mobile tap zones
-  const handleTap = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (!isTouch) return;
-      if ((e.target as HTMLElement).closest("[data-controls]")) return;
-      if ((e.target as HTMLElement).closest(".epub-content a")) return;
+  // Mobile tap zones — use touch events directly since onClick often doesn't
+  // fire when nested scrollable/overflow elements consume the touch gesture.
+  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
 
-      // If controls are visible, any tap outside controls dismisses immediately
-      if (controlsVisible) {
-        setControlsVisible(false);
-        return;
-      }
+  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (!isTouch) return;
+    const touch = e.touches[0];
+    touchStartRef.current = { x: touch.clientX, y: touch.clientY, t: Date.now() };
+  }, [isTouch]);
 
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = e.clientX - rect.left;
-      const third = rect.width / 3;
+  const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    if (!isTouch || !touchStartRef.current) return;
+    const touch = e.changedTouches[0];
+    const dx = Math.abs(touch.clientX - touchStartRef.current.x);
+    const dy = Math.abs(touch.clientY - touchStartRef.current.y);
+    const dt = Date.now() - touchStartRef.current.t;
+    touchStartRef.current = null;
 
-      if (x < third) {
-        // Left third: prev page within book
-        (window as any).__readerNav?.(-1);
-      } else if (x > third * 2) {
-        // Right third: next page within book
-        (window as any).__readerNav?.(1);
-      } else {
-        // Center: show overlay
-        setControlsVisible(true);
-      }
-    },
-    [isTouch, controlsVisible]
-  );
+    // Only treat as a tap if finger didn't move much and was quick
+    if (dx > 15 || dy > 15 || dt > 400) return;
+
+    if ((e.target as HTMLElement).closest("[data-controls]")) return;
+    if ((e.target as HTMLElement).closest(".epub-content a")) return;
+
+    // If controls are visible, any tap outside controls dismisses immediately
+    if (controlsVisible) {
+      setControlsVisible(false);
+      return;
+    }
+
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = touch.clientX - rect.left;
+    const third = rect.width / 3;
+
+    if (x < third) {
+      // Left third: prev page within book
+      (window as any).__readerNav?.(-1);
+    } else if (x > third * 2) {
+      // Right third: next page within book
+      (window as any).__readerNav?.(1);
+    } else {
+      // Center: show overlay
+      setControlsVisible(true);
+    }
+  }, [isTouch, controlsVisible]);
 
   // Desktop click — center click toggles overlay
   const handleClick = useCallback(
@@ -1065,20 +1095,19 @@ export default function Reader() {
       className={`fixed inset-0 bg-gray-950 flex flex-col select-none ${!isTouch && !controlsVisible ? "cursor-none" : ""}`}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      onClick={(e) => {
-        handleTap(e);
-        handleClick(e);
-      }}
+      onTouchStart={handleTouchStart}
+      onTouchEnd={handleTouchEnd}
+      onClick={handleClick}
     >
       {/* Top bar overlay */}
       <div
         data-controls
-        className={`absolute top-0 left-0 right-0 z-20 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-        style={{ paddingBottom: "2.5rem" }}
+        className={`absolute top-0 left-0 right-0 z-20 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+0.5rem))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        style={{ paddingBottom: "3rem" }}
       >
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <button onClick={goBack} className="text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
           </button>
@@ -1097,7 +1126,7 @@ export default function Reader() {
             title="Download"
             onClick={(e) => e.stopPropagation()}
           >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12l7 7 7-7" />
               <path strokeLinecap="round" d="M5 20h14" />
             </svg>
@@ -1109,7 +1138,7 @@ export default function Reader() {
             className="text-white/80 hover:text-white transition-colors cursor-pointer"
             title="Settings"
           >
-            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>

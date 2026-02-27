@@ -201,6 +201,7 @@ export interface AppConfig {
     page_size: number;
     book_font: string;
     book_font_weight: number;
+    book_line_height: number;
   };
   music_folders: string[];
   music_profiles: { name: string; bitrate?: string }[];
