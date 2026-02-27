@@ -12,6 +12,7 @@ import {
   pdfPageUrl,
   downloadUrl,
   getMarkdownContent,
+  getConfig,
 } from "../api";
 
 function isTouchDevice() {
@@ -69,6 +70,7 @@ interface ReaderSettings {
   epubFontSize: number;
   epubBg: "dark" | "light" | "amber";
   epubFontFamily: string;
+  epubFontWeight: number;
   showEpubPages: boolean;
   // PDF
   pdfFit: "width" | "height" | "page";
@@ -80,7 +82,8 @@ const defaultSettings: ReaderSettings = {
   epubMargin: "medium",
   epubFontSize: 18,
   epubBg: "dark",
-  epubFontFamily: "serif",
+  epubFontFamily: "Ubuntu",
+  epubFontWeight: 400,
   showEpubPages: true,
   pdfFit: "width",
   navMode: "page",
@@ -198,7 +201,7 @@ function EpubReader({
     if (loading || settings.navMode !== "page") return;
     const t = setTimeout(measureSize, 50);
     return () => clearTimeout(t);
-  }, [html, loading, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.navMode, measureSize]);
+  }, [html, loading, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.navMode, measureSize]);
 
   // Recount pages after contentWidth/contentHeight changes or content changes.
   // Use rAF so the browser has applied the column CSS before we measure.
@@ -206,7 +209,7 @@ function EpubReader({
     if (loading || settings.navMode !== "page" || contentWidth <= 0) return;
     const id = requestAnimationFrame(() => countPages());
     return () => cancelAnimationFrame(id);
-  }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, countPages]);
+  }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, countPages]);
 
   // Window resize listener — recalculate page dimensions on any resize
   useEffect(() => {
@@ -308,9 +311,10 @@ function EpubReader({
         style={{
           backgroundColor: bgStyle.bg,
           color: bgStyle.color,
-          padding: `1rem ${marginMap[settings.epubMargin]}`,
+          padding: `2rem ${marginMap[settings.epubMargin]} 1rem`,
           fontSize: `${settings.epubFontSize}px`,
           fontFamily: settings.epubFontFamily,
+          fontWeight: settings.epubFontWeight,
           lineHeight: 1.7,
           ...(isPageFlip ? { maxWidth: "56rem", margin: "0 auto", width: "100%" } : {}),
         }}
@@ -567,9 +571,10 @@ function MarkdownReader({
         style={{
           backgroundColor: bgStyle.bg,
           color: bgStyle.color,
-          padding: `1rem ${marginMap[settings.epubMargin]}`,
+          padding: `2rem ${marginMap[settings.epubMargin]} 1rem`,
           fontSize: `${settings.epubFontSize}px`,
           fontFamily: settings.epubFontFamily,
+          fontWeight: settings.epubFontWeight,
           lineHeight: 1.7,
         }}
         onScroll={handleScroll}
@@ -670,6 +675,18 @@ function SettingsPanel({
               </select>
             </div>
             <div>
+              <label className="text-xs text-gray-400 mb-1 block">Font Weight: {settings.epubFontWeight}</label>
+              <input
+                type="range"
+                min={100}
+                max={900}
+                step={100}
+                value={settings.epubFontWeight}
+                onChange={(e) => update({ epubFontWeight: Number(e.target.value) })}
+                className="w-full"
+              />
+            </div>
+            <div>
               <label className="text-xs text-gray-400 mb-1 block">Margin</label>
               <div className="flex gap-2">
                 {(["small", "medium", "large"] as const).map((m) => (
@@ -768,6 +785,21 @@ export default function Reader() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [settings, setSettings] = useState<ReaderSettings>(loadSettings);
+
+  // Apply server defaults for book font settings (only if user hasn't saved a preference)
+  useEffect(() => {
+    getConfig().then((cfg) => {
+      const saved = localStorage.getItem(SETTINGS_KEY);
+      const parsed = saved ? JSON.parse(saved) : {};
+      const updates: Partial<ReaderSettings> = {};
+      if (!parsed.epubFontFamily && cfg.defaults.book_font) updates.epubFontFamily = cfg.defaults.book_font;
+      if (!parsed.epubFontWeight && cfg.defaults.book_font_weight) updates.epubFontWeight = cfg.defaults.book_font_weight;
+      if (Object.keys(updates).length > 0) {
+        setSettings((prev) => ({ ...prev, ...updates }));
+      }
+    }).catch(() => {});
+  }, []);
+
   const [pageInfo, setPageInfo] = useState({ current: 0, total: 0 });
 
   // Sibling files

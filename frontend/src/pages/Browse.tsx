@@ -113,6 +113,8 @@ function AccountMenu({ onLogout, prefs, setPrefs, config }: {
         </svg>
       </button>
       {open && (
+        <>
+        <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
         <div className="absolute right-0 mt-2 bg-gray-900 border border-gray-700 rounded-lg shadow-lg py-1 min-w-[260px] z-50 max-h-[80vh] overflow-y-auto">
           <div className="px-3 py-2 space-y-3">
             <div className="flex items-center justify-between gap-3">
@@ -193,6 +195,7 @@ function AccountMenu({ onLogout, prefs, setPrefs, config }: {
             Logout
           </button>
         </div>
+        </>
       )}
     </div>
   );

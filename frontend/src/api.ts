@@ -198,6 +198,8 @@ export interface AppConfig {
     subtitle_mode: string;
     thumbnail_candidates: number;
     grid_size: string;
+    book_font: string;
+    book_font_weight: number;
   };
   music_folders: string[];
   music_profiles: { name: string; bitrate?: string }[];

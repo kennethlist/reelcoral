@@ -348,10 +348,25 @@ export default function Player() {
     window.addEventListener("resize", calcBottom);
     const onFs = () => requestAnimationFrame(calcBottom);
     document.addEventListener("fullscreenchange", onFs);
+    // Orientation changes on mobile may not update layout immediately
+    const onOrientation = () => {
+      requestAnimationFrame(calcBottom);
+      setTimeout(calcBottom, 100);
+      setTimeout(calcBottom, 300);
+    };
+    window.addEventListener("orientationchange", onOrientation);
+    // ResizeObserver catches layout changes that resize/orientationchange may miss
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(calcBottom);
+      ro.observe(container);
+    }
     return () => {
       video.removeEventListener("loadedmetadata", calcBottom);
       window.removeEventListener("resize", calcBottom);
       document.removeEventListener("fullscreenchange", onFs);
+      window.removeEventListener("orientationchange", onOrientation);
+      ro?.disconnect();
     };
   }, []);
 
@@ -441,24 +456,27 @@ export default function Player() {
     }
   }, []);
 
-  // Mobile: tap to toggle overlay visibility (does NOT pause/play)
+  // Click handler: mobile toggles overlay, desktop toggles play/pause
   const handleVideoClick = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-controls]")) return;
-    if (!("ontouchend" in window)) return;
-    const video = videoRef.current;
-    if (!video) return;
-    // When paused, overlay stays visible — don't allow dismissing
-    if (video.paused) return;
-    setControlsVisible((v) => {
-      if (!v) {
-        // Showing overlay — schedule auto-hide
-        scheduleHide(3000);
-      } else {
-        // Hiding overlay — cancel timer
-        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-      }
-      return !v;
-    });
+    if ("ontouchend" in window) {
+      // Mobile: tap to toggle overlay visibility (does NOT pause/play)
+      const video = videoRef.current;
+      if (!video) return;
+      // When paused, overlay stays visible — don't allow dismissing
+      if (video.paused) return;
+      setControlsVisible((v) => {
+        if (!v) {
+          scheduleHide(3000);
+        } else {
+          if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+        }
+        return !v;
+      });
+    } else {
+      // Desktop: click empty area to toggle play/pause
+      togglePlayPause();
+    }
   }, [scheduleHide]);
 
   // Close settings when clicking outside
@@ -673,34 +691,6 @@ export default function Player() {
         </div>
       )}
 
-      {/* Desktop prev/next arrow buttons */}
-      {!isMobile && hasPrev && (
-        <button
-          data-controls
-          onClick={() => goToSibling(-1)}
-          className={`absolute left-0 top-14 bottom-14 w-16 flex items-center justify-center z-30 transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-        >
-          <div className="bg-black/50 rounded-full p-2">
-            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-            </svg>
-          </div>
-        </button>
-      )}
-      {!isMobile && hasNext && (
-        <button
-          data-controls
-          onClick={() => goToSibling(1)}
-          className={`absolute right-0 top-14 bottom-14 w-16 flex items-center justify-center z-30 transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
-        >
-          <div className="bg-black/50 rounded-full p-2">
-            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </div>
-        </button>
-      )}
-
       {/* Controls overlay */}
       <div
         data-controls
@@ -727,30 +717,28 @@ export default function Player() {
           )}
         </div>
 
-        {/* Spacer — clicking here toggles play on desktop */}
-        <div className="flex-1 flex items-center justify-center gap-8" onClick={(e) => {
-          if (!(e.target as HTMLElement).closest("[data-center-btn]")) {
-            togglePlayPause();
-          }
-        }}>
-          {/* Prev button (mobile overlay) */}
-          {isMobile && hasPrev && (
+        {/* Center area — prev / play-pause / next spread across, pointer-events pass through to video behind */}
+        <div className="flex-1 flex items-center justify-between px-8 pointer-events-none">
+          {/* Prev button */}
+          {hasPrev ? (
             <button
-              data-center-btn
+              data-controls
               onClick={(e) => { e.stopPropagation(); goToSibling(-1); }}
-              className="bg-black/40 rounded-full p-3 text-white hover:text-blue-400 transition-all cursor-pointer"
+              className="pointer-events-auto bg-black/40 rounded-full p-3 text-white hover:text-blue-400 transition-all cursor-pointer"
             >
               <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
               </svg>
             </button>
+          ) : (
+            <div className="w-14" />
           )}
 
           {/* Large centered play/pause button */}
           <button
-            data-center-btn
+            data-controls
             onClick={(e) => { e.stopPropagation(); togglePlayPause(); if (isMobile && !videoRef.current?.paused) scheduleHide(3000); }}
-            className="bg-black/40 rounded-full p-4 text-white hover:text-blue-400 transition-all hover:scale-110 cursor-pointer"
+            className="pointer-events-auto bg-black/40 rounded-full p-4 text-white hover:text-blue-400 transition-all hover:scale-110 cursor-pointer"
           >
             {paused ? (
               <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12" viewBox="0 0 24 24" fill="currentColor">
@@ -763,17 +751,19 @@ export default function Player() {
             )}
           </button>
 
-          {/* Next button (mobile overlay) */}
-          {isMobile && hasNext && (
+          {/* Next button */}
+          {hasNext ? (
             <button
-              data-center-btn
+              data-controls
               onClick={(e) => { e.stopPropagation(); goToSibling(1); }}
-              className="bg-black/40 rounded-full p-3 text-white hover:text-blue-400 transition-all cursor-pointer"
+              className="pointer-events-auto bg-black/40 rounded-full p-3 text-white hover:text-blue-400 transition-all cursor-pointer"
             >
               <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
               </svg>
             </button>
+          ) : (
+            <div className="w-14" />
           )}
         </div>
 

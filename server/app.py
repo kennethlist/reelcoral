@@ -78,6 +78,8 @@ def create_app():
                 "subtitle_mode": defaults_cfg.get("subtitle_mode", "external"),
                 "thumbnail_candidates": defaults_cfg.get("thumbnail_candidates", 3),
                 "grid_size": defaults_cfg.get("grid_size", "small"),
+                "book_font": defaults_cfg.get("book_font", "serif"),
+                "book_font_weight": defaults_cfg.get("book_font_weight", 400),
             },
             "music_folders": music_folders,
             "music_profiles": music_profiles,
