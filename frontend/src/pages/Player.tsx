@@ -344,7 +344,11 @@ export default function Player() {
     };
 
     calcBottom();
+    // Catch cases where metadata is already loaded synchronously (cached video)
+    const rafId = requestAnimationFrame(() => setTimeout(calcBottom, 0));
     video.addEventListener("loadedmetadata", calcBottom);
+    video.addEventListener("loadeddata", calcBottom);
+    video.addEventListener("playing", calcBottom);
     window.addEventListener("resize", calcBottom);
     const onFs = () => requestAnimationFrame(calcBottom);
     document.addEventListener("fullscreenchange", onFs);
@@ -362,7 +366,10 @@ export default function Player() {
       ro.observe(container);
     }
     return () => {
+      cancelAnimationFrame(rafId);
       video.removeEventListener("loadedmetadata", calcBottom);
+      video.removeEventListener("loadeddata", calcBottom);
+      video.removeEventListener("playing", calcBottom);
       window.removeEventListener("resize", calcBottom);
       document.removeEventListener("fullscreenchange", onFs);
       window.removeEventListener("orientationchange", onOrientation);
@@ -737,7 +744,7 @@ export default function Player() {
           {/* Large centered play/pause button */}
           <button
             data-controls
-            onClick={(e) => { e.stopPropagation(); togglePlayPause(); if (isMobile && !videoRef.current?.paused) scheduleHide(3000); }}
+            onClick={(e) => { e.stopPropagation(); const wasPaused = videoRef.current?.paused; togglePlayPause(); if (isMobile && wasPaused) setControlsVisible(false); }}
             className="pointer-events-auto bg-black/40 rounded-full p-4 text-white hover:text-blue-400 transition-all hover:scale-110 cursor-pointer"
           >
             {paused ? (

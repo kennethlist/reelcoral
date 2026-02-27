@@ -1172,8 +1172,8 @@ export default function Reader() {
         </div>
       )}
 
-      {/* Desktop side arrows for sibling navigation */}
-      {!isTouch && hasPrev && controlsVisible && (
+      {/* Side arrows for sibling navigation */}
+      {hasPrev && controlsVisible && (
         <button
           data-controls
           onClick={() => goToSibling(-1)}
@@ -1186,7 +1186,7 @@ export default function Reader() {
           </div>
         </button>
       )}
-      {!isTouch && hasNext && controlsVisible && (
+      {hasNext && controlsVisible && (
         <button
           data-controls
           onClick={() => goToSibling(1)}
