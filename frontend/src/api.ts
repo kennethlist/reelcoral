@@ -198,6 +198,7 @@ export interface AppConfig {
     subtitle_mode: string;
     thumbnail_candidates: number;
     grid_size: string;
+    page_size: number;
     book_font: string;
     book_font_weight: number;
   };
