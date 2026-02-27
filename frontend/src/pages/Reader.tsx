@@ -129,33 +129,64 @@ function EpubReader({
   const [contentHeight, setContentHeight] = useState(0);
   // Track reading progress as a fraction (0..1) so resizes keep the same position
   const progressRef = useRef(0);
-  // Don't save position until the book is loaded and position is restored
+  // Don't save position until the book is fully loaded and position is restored
   const positionRestoredRef = useRef(false);
+  const fullyLoadedRef = useRef(false);
 
-  // Load all chapters at once
+  // Two-phase chapter loading: show first chapter immediately, then load rest in background
   useEffect(() => {
+    let cancelled = false;
+
     // Reset state for new book
     setCurrentPage(0);
     setTotalPages(1);
     progressRef.current = 0;
     positionRestoredRef.current = false;
+    fullyLoadedRef.current = false;
     setLoading(true);
     setLoadProgress("Loading book info...");
+
     getEbookInfo(path).then(async (data) => {
+      if (cancelled) return;
       setInfo(data);
-      // Fetch all chapters and concatenate
-      const parts: string[] = [];
-      for (let i = 0; i < data.chapter_count; i++) {
-        setLoadProgress(`Loading chapter ${i + 1} / ${data.chapter_count}...`);
-        const ch = await getEbookChapter(path, i);
-        parts.push(ch.html);
-      }
-      const fullHtml = parts.join('<hr class="epub-chapter-break" />');
-      setHtml(fullHtml);
+
+      // Phase 1: Show first/saved chapter immediately
+      const saved = getPosition(path);
+      const startChapter = Math.max(0, Math.min(saved?.chapter ?? 0, data.chapter_count - 1));
+      const firstCh = await getEbookChapter(path, startChapter);
+      if (cancelled) return;
+      setHtml(firstCh.html);
       setLoading(false);
 
-      // Restore saved position
-      const saved = getPosition(path);
+      // Phase 2: Load remaining chapters in the background
+      if (data.chapter_count <= 1) {
+        // Only one chapter — already fully loaded
+        if (settings.navMode === "scroll" && saved?.scrollY) {
+          requestAnimationFrame(() => {
+            contentRef.current?.scrollTo({ top: saved.scrollY });
+          });
+        } else if (settings.navMode === "page" && saved?.progress != null) {
+          progressRef.current = saved.progress;
+        }
+        positionRestoredRef.current = true;
+        fullyLoadedRef.current = true;
+        return;
+      }
+
+      const parts: string[] = new Array(data.chapter_count);
+      parts[startChapter] = firstCh.html;
+      for (let i = 0; i < data.chapter_count; i++) {
+        if (i === startChapter) continue;
+        if (cancelled) return;
+        const ch = await getEbookChapter(path, i);
+        if (cancelled) return;
+        parts[i] = ch.html;
+      }
+
+      const fullHtml = parts.join('<hr class="epub-chapter-break" />');
+      setHtml(fullHtml);
+
+      // Restore saved position after full content is rendered
       if (settings.navMode === "scroll" && saved?.scrollY) {
         requestAnimationFrame(() => {
           contentRef.current?.scrollTo({ top: saved.scrollY });
@@ -164,7 +195,10 @@ function EpubReader({
         progressRef.current = saved.progress;
       }
       positionRestoredRef.current = true;
+      fullyLoadedRef.current = true;
     });
+
+    return () => { cancelled = true; };
   }, [path]);
 
   // Clipping wrapper ref — used to measure the single-page width and height.
@@ -234,11 +268,12 @@ function EpubReader({
     if (!info) return;
     if (settings.navMode === "page") {
       onPageInfo(currentPage + 1, totalPages);
-      // Only save after position has been restored to avoid overwriting saved data
-      if (positionRestoredRef.current) {
+      // Only save after fully loaded and position restored to avoid overwriting saved data
+      if (fullyLoadedRef.current) {
         const progress = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
         progressRef.current = progress;
-        savePosition(path, { page: currentPage, progress });
+        const chapter = info ? Math.max(0, Math.min(Math.floor(progress * info.chapter_count), info.chapter_count - 1)) : 0;
+        savePosition(path, { page: currentPage, progress, chapter });
       }
     }
   }, [currentPage, totalPages, settings.navMode, info]);
@@ -319,6 +354,9 @@ function EpubReader({
           ...(isPageFlip ? { maxWidth: "56rem", margin: "0 auto", width: "100%" } : {}),
         }}
         onScroll={handleScroll}
+        onClick={(e) => {
+          if ((e.target as HTMLElement).closest("a")) e.preventDefault();
+        }}
       >
         {isPageFlip ? (
           /* Clipping wrapper — sits inside padding, clips column overflow at content edge */
@@ -922,6 +960,13 @@ export default function Reader() {
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!isTouch) return;
       if ((e.target as HTMLElement).closest("[data-controls]")) return;
+      if ((e.target as HTMLElement).closest(".epub-content a")) return;
+
+      // If controls are visible, any tap outside controls dismisses immediately
+      if (controlsVisible) {
+        setControlsVisible(false);
+        return;
+      }
 
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -935,11 +980,11 @@ export default function Reader() {
         // Right third: next page within book
         (window as any).__readerNav?.(1);
       } else {
-        // Center: toggle overlay
-        setControlsVisible((v) => !v);
+        // Center: show overlay
+        setControlsVisible(true);
       }
     },
-    [isTouch]
+    [isTouch, controlsVisible]
   );
 
   // Desktop click — center click toggles overlay
@@ -947,6 +992,7 @@ export default function Reader() {
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (isTouch) return;
       if ((e.target as HTMLElement).closest("[data-controls]")) return;
+      if ((e.target as HTMLElement).closest(".epub-content a")) return;
       if ((e.target as HTMLElement).closest("button")) return;
       if ((e.target as HTMLElement).closest("a")) return;
 
@@ -1215,7 +1261,7 @@ export default function Reader() {
         .epub-content img { max-width: 100%; height: auto; max-height: var(--epub-page-height, none); object-fit: contain; break-inside: avoid; display: block; margin-left: auto; margin-right: auto; }
         .epub-content h1, .epub-content h2, .epub-content h3 { margin: 1em 0 0.5em; }
         .epub-content p { margin: 0.5em 0; }
-        .epub-content a { color: inherit; text-decoration: none; pointer-events: none; }
+        .epub-content a { color: inherit; text-decoration: none; }
         .epub-content hr.epub-chapter-break { border: none; margin: 2em 0; break-before: column; }
         .markdown-content h1 { font-size: 2em; font-weight: bold; margin: 0.67em 0; border-bottom: 1px solid currentColor; padding-bottom: 0.3em; opacity: 0.9; }
         .markdown-content h2 { font-size: 1.5em; font-weight: bold; margin: 0.83em 0; border-bottom: 1px solid currentColor; padding-bottom: 0.2em; opacity: 0.8; }
