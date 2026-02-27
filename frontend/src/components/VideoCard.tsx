@@ -73,14 +73,14 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
     }
   } else if (entry.is_image) {
     thumbUrl = `/api/image?path=${encodeURIComponent(entry.path)}`;
+  } else if (entry.name.toLowerCase().endsWith(".pdf")) {
+    thumbUrl = `/api/pdf/page?path=${encodeURIComponent(entry.path)}&page=0&fit=width&width=320&height=480`;
   } else if (entry.is_ebook) {
     thumbUrl = `/api/ebook/cover?path=${encodeURIComponent(entry.path)}`;
   } else if (entry.is_comic) {
     thumbUrl = `/api/comic/page?path=${encodeURIComponent(entry.path)}&page=0`;
   } else if (entry.is_markdown) {
     thumbUrl = null; // No server-side thumbnail for markdown
-  } else if (entry.name.toLowerCase().endsWith(".pdf")) {
-    thumbUrl = `/api/pdf/page?path=${encodeURIComponent(entry.path)}&page=0&fit=width&width=320&height=480`;
   } else {
     thumbUrl = `/api/thumbnail?path=${encodeURIComponent(entry.path)}${thumbVersion ? `&v=${thumbVersion}` : ""}${genParam}`;
   }

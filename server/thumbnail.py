@@ -48,30 +48,27 @@ def _find_first_media(dirpath, video_extensions, image_extensions=IMAGE_EXTS, de
     return None, False
 
 
-def _find_first_book(dirpath, depth=5):
-    """Recursively find the first book file in a directory."""
+def _find_books(dirpath, depth=5):
+    """Recursively yield book files in a directory."""
     if depth <= 0:
-        return None
+        return
     try:
         items = sorted(os.listdir(dirpath), key=str.lower)
     except (PermissionError, OSError):
-        return None
+        return
     for name in items:
         if name.startswith("."):
             continue
         full = os.path.join(dirpath, name)
         ext = os.path.splitext(name)[1].lower()
         if os.path.isfile(full) and ext in BOOK_EXTS:
-            return full
+            yield full
     for name in items:
         if name.startswith("."):
             continue
         full = os.path.join(dirpath, name)
         if os.path.isdir(full):
-            result = _find_first_book(full, depth - 1)
-            if result:
-                return result
-    return None
+            yield from _find_books(full, depth - 1)
 
 
 def _generate_book_thumbnail(book_path, cache_path):
@@ -215,11 +212,13 @@ def thumbnail():
     # For directories, find the first video or image file recursively
     is_image = False
     is_book = False
-    if os.path.isdir(filepath):
+    is_dir = os.path.isdir(filepath)
+    dir_for_books = filepath if is_dir else None
+    if is_dir:
         media_file, is_image = _find_first_media(filepath, extensions)
         if not media_file:
             # Fall back to first book file
-            media_file = _find_first_book(filepath)
+            media_file = next(_find_books(filepath), None)
             if not media_file:
                 return jsonify({"error": "no media found"}), 404
             is_book = True
@@ -256,6 +255,17 @@ def thumbnail():
 
     if is_book:
         ok = _generate_book_thumbnail(filepath, cache_path)
+        if not ok and dir_for_books:
+            # First book failed; try remaining books in the directory
+            for alt_book in _find_books(dir_for_books):
+                if alt_book == filepath:
+                    continue
+                alt_hash = hashlib.sha256(alt_book.encode()).hexdigest()
+                alt_cache = cache_path_for(alt_hash)
+                os.makedirs(os.path.dirname(alt_cache), exist_ok=True)
+                if _generate_book_thumbnail(alt_book, cache_path):
+                    ok = True
+                    break
         if not ok:
             return jsonify({"error": "thumbnail generation failed"}), 500
         return send_file(cache_path, mimetype="image/jpeg")
