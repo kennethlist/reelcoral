@@ -48,8 +48,8 @@ export function usePreferences() {
           subtitles_enabled: cfg.defaults.subtitles_enabled,
           subtitle_mode: cfg.defaults.subtitle_mode as "burn" | "external",
           subtitle_font_size: "medium",
-          thumbnail_candidates: 3,
-          grid_size: "small",
+          thumbnail_candidates: (cfg.defaults.thumbnail_candidates || 3) as 3 | 6 | 9,
+          grid_size: (cfg.defaults.grid_size || "small") as "small" | "large",
         };
         // Re-load: localStorage overrides take precedence over server defaults
         setPrefsState(load(serverDefaults));

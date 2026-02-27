@@ -1,13 +1,14 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, logout, getConfig, BrowseResult, BrowseEntry, downloadUrl, downloadBulk } from "../api";
+import { browse, logout, getConfig, AppConfig, BrowseResult, BrowseEntry, downloadUrl } from "../api";
 import VideoCard from "../components/VideoCard";
 import Breadcrumbs from "../components/Breadcrumbs";
 import SearchBar from "../components/SearchBar";
 import Pagination from "../components/Pagination";
 import ThumbnailPicker from "../components/ThumbnailPicker";
 import { useMusicPlayer, type MusicTrack } from "../hooks/useMusicPlayer";
-import { usePreferences } from "../hooks/usePreferences";
+import { usePreferences, type Preferences } from "../hooks/usePreferences";
+import { languageList } from "../utils/languages";
 
 function formatSize(bytes?: number): string {
   if (!bytes) return "";
@@ -77,10 +78,16 @@ function popScrollPos(path: string): number | null {
   }
 }
 
-function AccountMenu({ onLogout }: { onLogout: () => void }) {
+const selectClass = "bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500";
+
+function AccountMenu({ onLogout, prefs, setPrefs, config }: {
+  onLogout: () => void;
+  prefs: Preferences;
+  setPrefs: (u: Partial<Preferences>) => void;
+  config: AppConfig | null;
+}) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
-  const nav = useNavigate();
 
   useEffect(() => {
     if (!open) return;
@@ -90,6 +97,9 @@ function AccountMenu({ onLogout }: { onLogout: () => void }) {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
+
+  const profiles = config?.profiles ?? [];
+  const subtitleValue = prefs.subtitles_enabled ? prefs.preferred_subtitle_lang : "off";
 
   return (
     <div ref={ref} className="relative">
@@ -103,19 +113,78 @@ function AccountMenu({ onLogout }: { onLogout: () => void }) {
         </svg>
       </button>
       {open && (
-        <div className="absolute right-0 mt-2 bg-gray-900 border border-gray-700 rounded-lg shadow-lg py-1 min-w-[200px] z-50">
-          <button
-            onClick={() => { setOpen(false); nav("/preferences"); }}
-            className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors cursor-pointer"
-          >
-            Preferences
-          </button>
-          <button
-            onClick={() => { setOpen(false); nav("/thumbnails"); }}
-            className="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors cursor-pointer"
-          >
-            Thumbnails
-          </button>
+        <div className="absolute right-0 mt-2 bg-gray-900 border border-gray-700 rounded-lg shadow-lg py-1 min-w-[260px] z-50 max-h-[80vh] overflow-y-auto">
+          <div className="px-3 py-2 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-400">Quality</span>
+              <select value={prefs.preferred_profile} onChange={(e) => setPrefs({ preferred_profile: e.target.value })} className={selectClass}>
+                {[...profiles].sort((a, b) => (a.name === "original" ? -1 : b.name === "original" ? 1 : 0)).map((p) => (
+                  <option key={p.name} value={p.name}>
+                    {p.name === "original" ? "Original" : p.name}{p.video_bitrate ? ` (${p.video_bitrate})` : ""}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-400">Audio</span>
+              <select value={prefs.preferred_audio_lang} onChange={(e) => setPrefs({ preferred_audio_lang: e.target.value })} className={selectClass}>
+                {languageList.map((l) => (<option key={l.code} value={l.code}>{l.name}</option>))}
+              </select>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-400">Subtitles</span>
+              <select
+                value={subtitleValue}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "off") setPrefs({ subtitles_enabled: false });
+                  else setPrefs({ subtitles_enabled: true, preferred_subtitle_lang: v });
+                }}
+                className={selectClass}
+              >
+                <option value="off">Off</option>
+                {languageList.map((l) => (<option key={l.code} value={l.code}>{l.name}</option>))}
+              </select>
+            </div>
+            {prefs.subtitles_enabled && (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-400">Sub Mode</span>
+                  <select value={prefs.subtitle_mode} onChange={(e) => setPrefs({ subtitle_mode: e.target.value as "burn" | "external" })} className={selectClass}>
+                    <option value="external">External</option>
+                    <option value="burn">Burn-in</option>
+                  </select>
+                </div>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-gray-400">Sub Size</span>
+                  <select value={prefs.subtitle_font_size} onChange={(e) => setPrefs({ subtitle_font_size: e.target.value as any })} className={selectClass}>
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                    <option value="extra-large">Extra Large</option>
+                  </select>
+                </div>
+              </>
+            )}
+          </div>
+          <div className="border-t border-gray-700 my-1" />
+          <div className="px-3 py-2 space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-400">Thumbnails</span>
+              <select value={prefs.thumbnail_candidates} onChange={(e) => setPrefs({ thumbnail_candidates: Number(e.target.value) as 3 | 6 | 9 })} className={selectClass}>
+                <option value={3}>3</option>
+                <option value={6}>6</option>
+                <option value={9}>9</option>
+              </select>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-400">Grid Size</span>
+              <select value={prefs.grid_size} onChange={(e) => setPrefs({ grid_size: e.target.value as "small" | "large" })} className={selectClass}>
+                <option value="small">Small</option>
+                <option value="large">Large</option>
+              </select>
+            </div>
+          </div>
           <div className="border-t border-gray-700 my-1" />
           <button
             onClick={() => { setOpen(false); onLogout(); }}
@@ -133,8 +202,9 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigate();
   const [generateOnFly, setGenerateOnFly] = useState(true);
+  const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
   const music = useMusicPlayer();
-  const { prefs } = usePreferences();
+  const { prefs, setPrefs } = usePreferences();
   const gridClass = prefs.grid_size === "large"
     ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4"
     : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6";
@@ -149,9 +219,6 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const [error, setError] = useState("");
   const [editingThumbnail, setEditingThumbnail] = useState<string | null>(null);
   const [thumbVersion, setThumbVersion] = useState(0);
-  const [selectMode, setSelectMode] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [downloading, setDownloading] = useState(false);
 
   // Compute parent path for back button
   const parentPath = useMemo(() => {
@@ -163,7 +230,10 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     getConfig()
-      .then((cfg) => setGenerateOnFly(cfg.generate_on_fly))
+      .then((cfg) => {
+        setGenerateOnFly(cfg.generate_on_fly);
+        setAppConfig(cfg);
+      })
       .catch(() => {});
   }, []);
 
@@ -195,8 +265,6 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   function navigate(path: string) {
     saveDirState(currentPath, currentDirState());
     saveScrollPos(currentPath, window.scrollY);
-    setSelectMode(false);
-    setSelected(new Set());
     const params: Record<string, string> = { path };
     addSortParams(params);
     setSearchParams(params);
@@ -278,43 +346,6 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     } catch {}
   }, [music]);
 
-  function toggleSelect(path: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }
-
-  function toggleSelectAll() {
-    if (!data) return;
-    const files = data.entries.filter((e) => !e.is_dir);
-    if (selected.size === files.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(files.map((e) => e.path)));
-    }
-  }
-
-  async function handleBulkDownload() {
-    if (selected.size === 0) return;
-    setDownloading(true);
-    try {
-      const blob = await downloadBulk(Array.from(selected));
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = "download.zip";
-      a.click();
-      URL.revokeObjectURL(url);
-      setSelectMode(false);
-      setSelected(new Set());
-    } catch {} finally {
-      setDownloading(false);
-    }
-  }
-
   function handleEntryClick(entry: BrowseEntry) {
     if (entry.is_dir) {
       navigate(entry.path);
@@ -374,7 +405,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <SearchBar value={currentSearch} onChange={handleSearch} />
-            <AccountMenu onLogout={handleLogout} />
+            <AccountMenu onLogout={handleLogout} prefs={prefs} setPrefs={setPrefs} config={appConfig} />
           </div>
         </div>
       </header>
@@ -396,14 +427,6 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
             <div className="h-5" />
           )}
           <div className="flex items-center gap-2 mr-6">
-            {!data?.is_music_folder && !data?.is_music_context && (
-              <button
-                onClick={() => { setSelectMode((v) => !v); setSelected(new Set()); }}
-                className={`text-xs px-2 py-1 rounded transition-colors cursor-pointer mr-2 ${selectMode ? "bg-blue-600 text-white" : "bg-gray-800 text-gray-400 hover:text-white"}`}
-              >
-                {selectMode ? "Cancel" : "Select"}
-              </button>
-            )}
             <span className="text-xs text-gray-500">Sort</span>
             <select
               value={currentSort}
@@ -559,17 +582,13 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
               {/* Artist list (no albums at this level) */}
               <div className="flex flex-col rounded-lg overflow-hidden mr-8">
                 {data.entries.map((entry, i) => (
-                  <div
+                  <button
                     key={entry.path}
-                    className={`flex items-center gap-3 px-4 py-3 ${i % 2 === 0 ? "bg-gray-900" : "bg-gray-900/60"} hover:bg-gray-800 text-gray-300 hover:text-white transition-colors group/row`}
+                    onClick={() => handleEntryClick(entry)}
+                    className={`flex items-center gap-3 px-4 py-3 w-full text-left cursor-pointer ${i % 2 === 0 ? "bg-gray-900" : "bg-gray-900/60"} hover:bg-gray-800 text-gray-300 hover:text-white transition-colors`}
                   >
-                    <button
-                      onClick={() => handleEntryClick(entry)}
-                      className="flex items-center flex-1 min-w-0 text-left cursor-pointer"
-                    >
-                      <span className="flex-1 text-sm truncate">{entry.name}</span>
-                    </button>
-                  </div>
+                    <span className="flex-1 text-sm truncate">{entry.name}</span>
+                  </button>
                 ))}
               </div>
               <Pagination
@@ -584,52 +603,12 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
         {data && data.entries.length > 0 && !data.is_music_folder && !data.is_music_context && (
           <>
-            {/* Select mode bar */}
-            {selectMode && (
-              <div className="flex items-center gap-3 mb-4 px-2 py-2 bg-gray-900 rounded-lg mr-8">
-                <button
-                  onClick={toggleSelectAll}
-                  className="text-xs px-3 py-1 rounded bg-gray-800 text-gray-300 hover:text-white transition-colors cursor-pointer"
-                >
-                  {selected.size === data.entries.filter((e) => !e.is_dir).length ? "Deselect All" : "Select All"}
-                </button>
-                <span className="text-xs text-gray-400">{selected.size} selected</span>
-                <div className="flex-1" />
-                <button
-                  onClick={handleBulkDownload}
-                  disabled={selected.size === 0 || downloading}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 transition-colors cursor-pointer"
-                >
-                  <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12l7 7 7-7" />
-                    <path strokeLinecap="round" d="M5 20h14" />
-                  </svg>
-                  {downloading ? "Downloading..." : "Download"}
-                </button>
-              </div>
-            )}
             {/* Normal grid for non-music content */}
             <div className={`grid ${gridClass} gap-4 pr-8`}>
               {data.entries.map((entry) => (
                 <div key={entry.path} className="relative group/card">
-                  {selectMode && !entry.is_dir && (
-                    <div
-                      onClick={(e) => { e.stopPropagation(); toggleSelect(entry.path); }}
-                      className="absolute top-2 left-2 z-10 cursor-pointer"
-                    >
-                      <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${
-                        selected.has(entry.path) ? "bg-blue-600 border-blue-600" : "border-gray-400 bg-black/40"
-                      }`}>
-                        {selected.has(entry.path) && (
-                          <svg className="w-3 h-3 text-white" viewBox="0 0 20 20" fill="currentColor">
-                            <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                          </svg>
-                        )}
-                      </div>
-                    </div>
-                  )}
                   {/* Per-file download button (hover) */}
-                  {!selectMode && !entry.is_dir && (
+                  {!entry.is_dir && (
                     <a
                       href={downloadUrl(entry.path)}
                       onClick={(e) => e.stopPropagation()}
@@ -644,8 +623,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
                   )}
                   <VideoCard
                     entry={entry}
-                    onClick={() => selectMode && !entry.is_dir ? toggleSelect(entry.path) : handleEntryClick(entry)}
-                    onEditThumbnail={selectMode ? undefined : () => setEditingThumbnail(entry.path)}
+                    onClick={() => handleEntryClick(entry)}
+                    onEditThumbnail={() => setEditingThumbnail(entry.path)}
                     thumbVersion={thumbVersion}
                     generateOnFly={generateOnFly}
                   />

@@ -28,7 +28,6 @@ def create_app():
     from image import image_bp
     from audio import audio_bp
     from thumbnail_select import thumbnail_select_bp
-    from thumbnail_gen import thumbnail_gen_bp
     from ebook import ebook_bp
     from comic import comic_bp
     from pdf import pdf_bp
@@ -44,7 +43,6 @@ def create_app():
     app.register_blueprint(probe_bp, url_prefix="/api/media")
     app.register_blueprint(image_bp, url_prefix="/api")
     app.register_blueprint(audio_bp, url_prefix="/api")
-    app.register_blueprint(thumbnail_gen_bp, url_prefix="/api/thumbnails")
     app.register_blueprint(ebook_bp, url_prefix="/api/ebook")
     app.register_blueprint(comic_bp, url_prefix="/api/comic")
     app.register_blueprint(pdf_bp, url_prefix="/api/pdf")
@@ -78,6 +76,8 @@ def create_app():
                 "subtitle_lang": defaults_cfg.get("subtitle_lang", "eng"),
                 "subtitles_enabled": defaults_cfg.get("subtitles_enabled", True),
                 "subtitle_mode": defaults_cfg.get("subtitle_mode", "external"),
+                "thumbnail_candidates": defaults_cfg.get("thumbnail_candidates", 3),
+                "grid_size": defaults_cfg.get("grid_size", "small"),
             },
             "music_folders": music_folders,
             "music_profiles": music_profiles,

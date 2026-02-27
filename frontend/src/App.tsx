@@ -6,8 +6,6 @@ import Player from "./pages/Player";
 import AudioPlayer from "./pages/AudioPlayer";
 import Gallery from "./pages/Gallery";
 import Reader from "./pages/Reader";
-import ThumbnailGen from "./pages/ThumbnailGen";
-import Preferences from "./pages/Preferences";
 import { checkAuth } from "./api";
 import { MusicPlayerProvider } from "./hooks/useMusicPlayer";
 import MusicBar from "./components/MusicBar";
@@ -56,14 +54,6 @@ export default function App() {
           <Route
             path="/read"
             element={authed ? <Reader /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/preferences"
-            element={authed ? <Preferences /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/thumbnails"
-            element={authed ? <ThumbnailGen /> : <Navigate to="/login" replace />}
           />
           <Route
             path="*"
