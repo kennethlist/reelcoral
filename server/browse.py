@@ -8,6 +8,7 @@ AUDIO_EXTS = {".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus"}
 EBOOK_EXTS = {".epub"}
 COMIC_EXTS = {".cbr", ".cbz"}
 MARKDOWN_EXTS = {".md"}
+BOOK_EXTS = EBOOK_EXTS | COMIC_EXTS | MARKDOWN_EXTS | {".pdf"}
 COVER_ART_NAMES = {"cover.jpg", "folder.jpg", "front.jpg", "album.jpg", "art.jpg",
                    "cover.png", "folder.png", "front.png", "album.png", "art.png"}
 
@@ -38,6 +39,36 @@ def _find_cover_art(abs_dir, parent_rel, dir_name):
     """Find cover art in a subdirectory, return its relative path or None."""
     sub_rel = os.path.join(parent_rel, dir_name) if parent_rel else dir_name
     return _find_cover_art_in(abs_dir, sub_rel)
+
+
+def _find_first_book(abs_dir, parent_rel, depth=3):
+    """Recursively find the first book file in a directory. Returns (rel_path, ext) or (None, None)."""
+    if depth <= 0:
+        return None, None
+    try:
+        items = sorted(os.listdir(abs_dir), key=str.lower)
+    except (PermissionError, OSError):
+        return None, None
+    # Check files first
+    for name in items:
+        if name.startswith("."):
+            continue
+        full = os.path.join(abs_dir, name)
+        ext = os.path.splitext(name)[1].lower()
+        if os.path.isfile(full) and ext in BOOK_EXTS:
+            rel = os.path.join("/", parent_rel, name) if parent_rel else "/" + name
+            return rel, ext
+    # Recurse into subdirectories
+    for name in items:
+        if name.startswith("."):
+            continue
+        full = os.path.join(abs_dir, name)
+        if os.path.isdir(full):
+            sub_rel = os.path.join(parent_rel, name) if parent_rel else name
+            result, ext = _find_first_book(full, sub_rel, depth - 1)
+            if result:
+                return result, ext
+    return None, None
 
 
 @browse_bp.route("/browse")
@@ -115,6 +146,18 @@ def browse():
                     entry["cover_art"] = cover
                 if _dir_has_audio(full):
                     entry["is_album"] = True
+            else:
+                # For non-music directories, find first book for thumbnail propagation
+                sub_rel = os.path.join(rel_path, name) if rel_path else name
+                book_path, book_ext = _find_first_book(full, sub_rel)
+                if book_path:
+                    entry["first_book"] = book_path
+                    if book_ext in EBOOK_EXTS:
+                        entry["first_book_type"] = "ebook"
+                    elif book_ext in COMIC_EXTS:
+                        entry["first_book_type"] = "comic"
+                    elif book_ext == ".pdf":
+                        entry["first_book_type"] = "pdf"
         try:
             entry["mtime"] = os.path.getmtime(full)
         except OSError:

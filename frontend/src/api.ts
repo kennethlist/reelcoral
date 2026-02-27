@@ -31,6 +31,8 @@ export interface BrowseEntry {
   is_markdown?: boolean;
   is_album?: boolean;
   cover_art?: string;
+  first_book?: string;
+  first_book_type?: "ebook" | "comic" | "pdf";
   size?: number;
   mtime?: number;
 }

@@ -318,7 +318,7 @@ function EpubReader({
       >
         {isPageFlip ? (
           /* Clipping wrapper — sits inside padding, clips column overflow at content edge */
-          <div ref={wrapperRef} style={{ overflow: "hidden", height: "100%" }}>
+          <div ref={wrapperRef} style={{ overflow: "hidden", height: "100%", ["--epub-page-height" as string]: contentHeight > 0 ? `${contentHeight}px` : "100%" }}>
             <div
               ref={innerRef}
               className="epub-content"
@@ -1180,7 +1180,7 @@ export default function Reader() {
 
       {/* EPUB global styles */}
       <style>{`
-        .epub-content img { max-width: 100%; height: auto; }
+        .epub-content img { max-width: 100%; height: auto; max-height: var(--epub-page-height, none); object-fit: contain; break-inside: avoid; }
         .epub-content h1, .epub-content h2, .epub-content h3 { margin: 1em 0 0.5em; }
         .epub-content p { margin: 0.5em 0; }
         .epub-content a { color: #60a5fa; text-decoration: underline; }

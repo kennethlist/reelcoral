@@ -70,6 +70,13 @@ thumbnails:
   generate_on_fly: true
   threads: 24
 
+defaults:
+  quality: "original"
+  audio_lang: "eng"
+  subtitle_lang: "eng"
+  subtitles_enabled: true
+  subtitle_mode: "external"
+
 auth:
   users:
     - username: "admin"
