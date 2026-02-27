@@ -7,13 +7,15 @@ import SearchBar from "../components/SearchBar";
 import Pagination from "../components/Pagination";
 import ThumbnailPicker from "../components/ThumbnailPicker";
 
-const DIR_STATE_KEY = "kmc-dir-state";
-const SCROLL_STATE_KEY = "kmc-scroll-state";
+const DIR_STATE_KEY = "rc-dir-state";
+const SCROLL_STATE_KEY = "rc-scroll-state";
 
 interface DirState {
   page: number;
   search?: string;
   letter?: string;
+  sort?: string;
+  sortDir?: string;
 }
 
 function saveDirState(path: string, state: DirState) {
@@ -121,6 +123,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const currentPage = Number(searchParams.get("page") || "1");
   const currentSearch = searchParams.get("search") || "";
   const activeLetter = searchParams.get("letter") || null;
+  const currentSort = searchParams.get("sort") || "alpha";
+  const currentSortDir = searchParams.get("dir") || "asc";
 
   const [data, setData] = useState<BrowseResult | null>(null);
   const [error, setError] = useState("");
@@ -145,7 +149,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     setError("");
-    browse(currentPath, currentPage, 50, currentSearch, activeLetter || undefined)
+    browse(currentPath, currentPage, 50, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
       .then((result) => {
         setData(result);
         // Restore scroll position if returning from player/gallery
@@ -155,28 +159,37 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         }
       })
       .catch(() => setError("Failed to load directory"));
-  }, [currentPath, currentPage, currentSearch, activeLetter]);
+  }, [currentPath, currentPage, currentSearch, activeLetter, currentSort, currentSortDir]);
+
+  function addSortParams(params: Record<string, string>, sort = currentSort, dir = currentSortDir) {
+    if (sort !== "alpha") params.sort = sort;
+    if (dir !== "asc") params.dir = dir;
+  }
+
+  function currentDirState(): DirState {
+    return { page: currentPage, search: currentSearch || undefined, letter: activeLetter || undefined, sort: currentSort !== "alpha" ? currentSort : undefined, sortDir: currentSortDir !== "asc" ? currentSortDir : undefined };
+  }
 
   function navigate(path: string) {
-    // Save current dir state before navigating forward
-    saveDirState(currentPath, { page: currentPage, search: currentSearch || undefined, letter: activeLetter || undefined });
+    saveDirState(currentPath, currentDirState());
     saveScrollPos(currentPath, window.scrollY);
-    // Forward navigation: reset filters (don't restore saved state)
-    setSearchParams({ path });
+    const params: Record<string, string> = { path };
+    addSortParams(params);
+    setSearchParams(params);
     window.scrollTo({ top: 0 });
   }
 
   function navigateBack(path: string) {
-    // Save current dir state before going back
-    saveDirState(currentPath, { page: currentPage, search: currentSearch || undefined, letter: activeLetter || undefined });
+    saveDirState(currentPath, currentDirState());
     saveScrollPos(currentPath, window.scrollY);
-    // Restore saved state for parent directory
     const saved = getDirState(path);
     const params: Record<string, string> = { path };
     if (saved) {
       if (saved.page > 1) params.page = String(saved.page);
       if (saved.search) params.search = saved.search;
       if (saved.letter) params.letter = saved.letter;
+      if (saved.sort) params.sort = saved.sort;
+      if (saved.sortDir) params.dir = saved.sortDir;
     }
     setSearchParams(params);
   }
@@ -184,6 +197,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   function handleSearch(search: string) {
     const params: Record<string, string> = { path: currentPath };
     if (search) params.search = search;
+    addSortParams(params);
     setSearchParams(params);
   }
 
@@ -191,6 +205,15 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     const params: Record<string, string> = { path: currentPath, page: String(page) };
     if (currentSearch) params.search = currentSearch;
     if (activeLetter) params.letter = activeLetter;
+    addSortParams(params);
+    setSearchParams(params);
+  }
+
+  function handleSortChange(sort: string, dir: string) {
+    const params: Record<string, string> = { path: currentPath };
+    if (currentSearch) params.search = currentSearch;
+    if (activeLetter) params.letter = activeLetter;
+    addSortParams(params, sort, dir);
     setSearchParams(params);
   }
 
@@ -198,7 +221,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     if (entry.is_dir) {
       navigate(entry.path);
     } else {
-      // Save scroll position before leaving browse page
+      // Save dir state and scroll position before leaving browse page
+      saveDirState(currentPath, currentDirState());
       saveScrollPos(currentPath, window.scrollY);
       if (entry.is_image) {
         nav(`/gallery?path=${encodeURIComponent(entry.path)}`);
@@ -215,12 +239,11 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   }, [data]);
 
   function handleLetterClick(letter: string) {
-    // Toggle: clicking the same letter again clears the filter
     const newLetter = activeLetter === letter ? null : letter;
-    // Reset to page 1 when changing letter filter
     const params: Record<string, string> = { path: currentPath };
     if (currentSearch) params.search = currentSearch;
     if (newLetter) params.letter = newLetter;
+    addSortParams(params);
     setSearchParams(params);
   }
 
@@ -246,20 +269,49 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
       </header>
 
       <main className="w-full px-4 py-6">
-        {parentPath !== null ? (
-          <button
-            onClick={() => navigateBack(parentPath)}
-            className="flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer mb-4"
-            title="Go back"
-          >
-            <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
-            </svg>
-            Back
-          </button>
-        ) : (
-          <div className="mb-4 h-5" />
-        )}
+        <div className="flex items-center justify-between mb-4">
+          {parentPath !== null ? (
+            <button
+              onClick={() => navigateBack(parentPath)}
+              className="flex items-center gap-1 text-sm text-gray-400 hover:text-white transition-colors cursor-pointer"
+              title="Go back"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clipRule="evenodd" />
+              </svg>
+              Back
+            </button>
+          ) : (
+            <div className="h-5" />
+          )}
+          <div className="flex items-center gap-2 mr-6">
+            <span className="text-xs text-gray-500">Sort</span>
+            <select
+              value={currentSort}
+              onChange={(e) => handleSortChange(e.target.value, currentSortDir)}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+            >
+              <option value="alpha">Name</option>
+              <option value="newest">Date</option>
+              <option value="largest">Size</option>
+            </select>
+            <button
+              onClick={() => handleSortChange(currentSort, currentSortDir === "asc" ? "desc" : "asc")}
+              className="text-gray-400 hover:text-white transition-colors cursor-pointer p-1"
+              title={currentSortDir === "asc" ? "Ascending" : "Descending"}
+            >
+              {currentSortDir === "asc" ? (
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12l7-7 7 7" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 19V5M5 12l7 7 7-7" />
+                </svg>
+              )}
+            </button>
+          </div>
+        </div>
 
         {error && (
           <div className="text-red-400 text-center py-8">{error}</div>

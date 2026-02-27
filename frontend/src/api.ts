@@ -26,6 +26,7 @@ export interface BrowseEntry {
   is_dir: boolean;
   is_image?: boolean;
   size?: number;
+  mtime?: number;
 }
 
 export interface Breadcrumb {
@@ -47,11 +48,15 @@ export async function browse(
   page = 1,
   limit = 50,
   search = "",
-  letter?: string
+  letter?: string,
+  sort?: string,
+  sortDir?: string
 ): Promise<BrowseResult> {
   const params = new URLSearchParams({ path, page: String(page), limit: String(limit) });
   if (search) params.set("search", search);
   if (letter) params.set("letter", letter);
+  if (sort && sort !== "alpha") params.set("sort", sort);
+  if (sortDir && sortDir !== "asc") params.set("dir", sortDir);
   const res = await fetch(`/api/browse?${params}`);
   if (!res.ok) throw new Error("Browse failed");
   return res.json();

@@ -17,6 +17,8 @@ def browse():
     limit = min(200, max(1, int(request.args.get("limit", 50))))
     search = request.args.get("search", "").lower().strip()
     letter = request.args.get("letter", "").strip()
+    sort = request.args.get("sort", "alpha").strip().lower()
+    sort_dir = request.args.get("dir", "asc").strip().lower()
 
     abs_path = os.path.realpath(os.path.join(root, rel_path))
     if not abs_path.startswith(os.path.realpath(root)):
@@ -54,10 +56,32 @@ def browse():
                 entry["size"] = os.path.getsize(full)
             except OSError:
                 entry["size"] = 0
+        try:
+            entry["mtime"] = os.path.getmtime(full)
+        except OSError:
+            entry["mtime"] = 0
         entries.append(entry)
 
-    # Sort: directories first, then files
-    entries.sort(key=lambda e: (not e["is_dir"], e["name"].lower()))
+    # Sort: directories first, then files sorted by chosen mode and direction
+    reverse = sort_dir == "desc"
+    if sort == "newest":
+        entries.sort(key=lambda e: (not e["is_dir"], e.get("mtime", 0)), reverse=False)
+        # Directories first (not reversed), then files by mtime
+        dirs = [e for e in entries if e["is_dir"]]
+        files = [e for e in entries if not e["is_dir"]]
+        files.sort(key=lambda e: e.get("mtime", 0), reverse=not reverse)
+        entries = dirs + files
+    elif sort == "largest":
+        dirs = [e for e in entries if e["is_dir"]]
+        files = [e for e in entries if not e["is_dir"]]
+        files.sort(key=lambda e: e.get("size", 0), reverse=not reverse)
+        entries = dirs + files
+    else:
+        dirs = [e for e in entries if e["is_dir"]]
+        files = [e for e in entries if not e["is_dir"]]
+        dirs.sort(key=lambda e: e["name"].lower(), reverse=reverse)
+        files.sort(key=lambda e: e["name"].lower(), reverse=reverse)
+        entries = dirs + files
 
     # Collect available letters from ALL entries (after search, before letter filter)
     letters = set()

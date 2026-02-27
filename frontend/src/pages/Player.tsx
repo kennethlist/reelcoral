@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import Hls from "hls.js";
-import { getMediaInfo, startStream, stopStream, MediaInfo } from "../api";
+import { getMediaInfo, startStream, stopStream, MediaInfo, browse, BrowseEntry } from "../api";
 import TrackSelector from "../components/TrackSelector";
 import { usePreferences, SubtitleFontSize } from "../hooks/usePreferences";
 
@@ -22,7 +22,7 @@ function formatTime(seconds: number): string {
 }
 
 export default function Player() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const filePath = searchParams.get("path") || "";
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -60,6 +60,10 @@ export default function Player() {
   const [seekPreview, setSeekPreview] = useState<number | null>(null); // visual preview during drag
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [hoverX, setHoverX] = useState(0); // px offset within progress bar
+
+  // Sibling files for next/prev navigation
+  const [siblings, setSiblings] = useState<BrowseEntry[]>([]);
+  const [siblingIndex, setSiblingIndex] = useState(-1);
 
   // Burn-in subtitle index: only meaningful when burning in on a non-original profile
   const burnSubIdx = subMode === "burn" && profile !== "original" ? subIdx : null;
@@ -113,6 +117,50 @@ export default function Player() {
       }
     }).catch(() => setError("Failed to load media info"));
   }, [filePath]);
+
+  // Load sibling files from parent directory for next/prev navigation,
+  // respecting any active filters from the browse page
+  useEffect(() => {
+    if (!filePath) return;
+    const parentDir = filePath.substring(0, filePath.lastIndexOf("/")) || "/";
+    let search = "";
+    let letter: string | undefined;
+    let sort: string | undefined;
+    let sortDir: string | undefined;
+    try {
+      const raw = sessionStorage.getItem("rc-dir-state");
+      if (raw) {
+        const saved = JSON.parse(raw)[parentDir];
+        if (saved) {
+          search = saved.search || "";
+          letter = saved.letter || undefined;
+          sort = saved.sort || undefined;
+          sortDir = saved.sortDir || undefined;
+        }
+      }
+    } catch {}
+    browse(parentDir, 1, 200, search, letter, sort, sortDir).then((data) => {
+      const files = data.entries.filter((e) => !e.is_dir);
+      setSiblings(files);
+      const idx = files.findIndex((e) => e.path === filePath);
+      setSiblingIndex(idx >= 0 ? idx : -1);
+    }).catch(() => {});
+  }, [filePath]);
+
+  const hasPrev = siblingIndex > 0;
+  const hasNext = siblingIndex >= 0 && siblingIndex < siblings.length - 1;
+
+  const goToSibling = useCallback((delta: number) => {
+    const nextIdx = siblingIndex + delta;
+    if (nextIdx < 0 || nextIdx >= siblings.length) return;
+    const entry = siblings[nextIdx];
+    if (entry.is_image) {
+      navigate(`/gallery?path=${encodeURIComponent(entry.path)}`, { replace: true });
+    } else {
+      // Navigate to another video — update search params to trigger re-init
+      setSearchParams({ path: entry.path }, { replace: true });
+    }
+  }, [siblingIndex, siblings, navigate, setSearchParams]);
 
   // Stream effect — only fires when actual stream params change
   useEffect(() => {
@@ -348,13 +396,16 @@ export default function Player() {
   const settingsOpenRef = useRef(settingsOpen);
   settingsOpenRef.current = settingsOpen;
 
-  const scheduleHide = useCallback((delay = 500) => {
+  const isMobileRef = useRef("ontouchend" in window);
+
+  const scheduleHide = useCallback((delay?: number) => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    const d = delay ?? (isMobileRef.current ? 3000 : 500);
     hideTimerRef.current = setTimeout(() => {
       if (!videoRef.current?.paused && !settingsOpenRef.current) {
         setControlsVisible(false);
       }
-    }, delay);
+    }, d);
   }, []);
 
   const showControls = useCallback(() => {
@@ -384,22 +435,25 @@ export default function Player() {
     }
   }, []);
 
-  // Mobile: tap to toggle play/pause + overlay
+  // Mobile: tap to toggle overlay visibility (does NOT pause/play)
   const handleVideoClick = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest("[data-controls]")) return;
     if (!("ontouchend" in window)) return;
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) {
-      // Unpause and immediately hide overlay
-      video.play().catch(() => {});
-      setControlsVisible(false);
-      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    } else {
-      // Pause and show overlay (it stays visible via the paused effect)
-      video.pause();
-    }
-  }, []);
+    // When paused, overlay stays visible — don't allow dismissing
+    if (video.paused) return;
+    setControlsVisible((v) => {
+      if (!v) {
+        // Showing overlay — schedule auto-hide
+        scheduleHide(3000);
+      } else {
+        // Hiding overlay — cancel timer
+        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      }
+      return !v;
+    });
+  }, [scheduleHide]);
 
   // Close settings when clicking outside
   useEffect(() => {
@@ -429,15 +483,15 @@ export default function Player() {
         video.muted = !video.muted;
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        seekTo(seekOffsetRef.current + video.currentTime - 10);
+        goToSibling(-1);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        seekTo(seekOffsetRef.current + video.currentTime + 10);
+        goToSibling(1);
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [totalDuration]);
+  }, [totalDuration, goToSibling]);
 
   function togglePlayPause() {
     const video = videoRef.current;
@@ -472,6 +526,9 @@ export default function Player() {
       const targetTime = getFraction(ev.clientX) * totalDuration;
       setIsSeeking(false);
       seekTo(targetTime);
+      // Keep overlay visible after seeking, reschedule auto-hide
+      setControlsVisible(true);
+      scheduleHide();
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
     };
@@ -547,6 +604,25 @@ export default function Player() {
 
   const isMobile = "ontouchend" in window;
 
+  function goBack() {
+    const parentDir = filePath.substring(0, filePath.lastIndexOf("/")) || "/";
+    const params = new URLSearchParams({ path: parentDir });
+    try {
+      const raw = sessionStorage.getItem("rc-dir-state");
+      if (raw) {
+        const saved = JSON.parse(raw)[parentDir];
+        if (saved) {
+          if (saved.page > 1) params.set("page", String(saved.page));
+          if (saved.search) params.set("search", saved.search);
+          if (saved.letter) params.set("letter", saved.letter);
+          if (saved.sort) params.set("sort", saved.sort);
+          if (saved.sortDir) params.set("dir", saved.sortDir);
+        }
+      }
+    } catch {}
+    navigate(`/?${params}`);
+  }
+
   const progressFraction = totalDuration > 0 ? displayTime / totalDuration : 0;
 
   return (
@@ -591,6 +667,34 @@ export default function Player() {
         </div>
       )}
 
+      {/* Desktop prev/next arrow buttons */}
+      {!isMobile && hasPrev && (
+        <button
+          data-controls
+          onClick={() => goToSibling(-1)}
+          className={`absolute left-0 top-14 bottom-14 w-16 flex items-center justify-center z-30 transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        >
+          <div className="bg-black/50 rounded-full p-2">
+            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+          </div>
+        </button>
+      )}
+      {!isMobile && hasNext && (
+        <button
+          data-controls
+          onClick={() => goToSibling(1)}
+          className={`absolute right-0 top-14 bottom-14 w-16 flex items-center justify-center z-30 transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        >
+          <div className="bg-black/50 rounded-full p-2">
+            <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        </button>
+      )}
+
       {/* Controls overlay */}
       <div
         data-controls
@@ -599,24 +703,73 @@ export default function Player() {
         {/* Top gradient bar */}
         <div className="bg-gradient-to-b from-black/70 to-transparent px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] flex items-center gap-3">
           <button
-            onClick={() => navigate(-1)}
-            className="text-sm text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer"
+            onClick={goBack}
+            className="text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer"
           >
-            <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
           </button>
-          <div className="text-sm text-gray-200 truncate cursor-pointer" onClick={() => navigate(-1)}>
+          <div className="flex-1" />
+          <div className="text-sm text-gray-200 truncate max-w-[50%]">
             {filePath.split("/").pop()}
           </div>
+          {siblings.length > 1 && siblingIndex >= 0 && (
+            <div className="text-sm text-gray-400 tabular-nums whitespace-nowrap">
+              {siblingIndex + 1} / {siblings.length}
+            </div>
+          )}
         </div>
 
         {/* Spacer — clicking here toggles play on desktop */}
-        <div className="flex-1" onClick={(e) => {
-          if (!(e.target as HTMLElement).closest("[data-controls-inner]")) {
+        <div className="flex-1 flex items-center justify-center gap-8" onClick={(e) => {
+          if (!(e.target as HTMLElement).closest("[data-center-btn]")) {
             togglePlayPause();
           }
-        }} />
+        }}>
+          {/* Prev button (mobile overlay) */}
+          {isMobile && hasPrev && (
+            <button
+              data-center-btn
+              onClick={(e) => { e.stopPropagation(); goToSibling(-1); }}
+              className="bg-black/40 rounded-full p-3 text-white hover:text-blue-400 transition-all cursor-pointer"
+            >
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+
+          {/* Large centered play/pause button */}
+          <button
+            data-center-btn
+            onClick={(e) => { e.stopPropagation(); togglePlayPause(); if (isMobile && !videoRef.current?.paused) scheduleHide(3000); }}
+            className="bg-black/40 rounded-full p-4 text-white hover:text-blue-400 transition-all hover:scale-110 cursor-pointer"
+          >
+            {paused ? (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-12 h-12" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+              </svg>
+            )}
+          </button>
+
+          {/* Next button (mobile overlay) */}
+          {isMobile && hasNext && (
+            <button
+              data-center-btn
+              onClick={(e) => { e.stopPropagation(); goToSibling(1); }}
+              className="bg-black/40 rounded-full p-3 text-white hover:text-blue-400 transition-all cursor-pointer"
+            >
+              <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          )}
+        </div>
 
         {/* Bottom controls area */}
         <div data-controls-inner className="bg-gradient-to-t from-black/70 to-transparent px-4 pb-4 pt-8">
@@ -652,6 +805,9 @@ export default function Player() {
               if (!isSeeking) return;
               setIsSeeking(false);
               if (seekPreview !== null) seekTo(seekPreview);
+              // After seeking, keep overlay visible and reschedule auto-hide
+              setControlsVisible(true);
+              scheduleHide(3000);
             }}
           >
             {/* Visible track */}

@@ -11,6 +11,7 @@ export default function Gallery() {
   const nav = useNavigate();
   const currentPath = searchParams.get("path") || "";
 
+  const [allFiles, setAllFiles] = useState<BrowseEntry[]>([]);
   const [images, setImages] = useState<BrowseEntry[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -20,14 +21,33 @@ export default function Gallery() {
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Load images from the parent directory
+  // Load all media files from the parent directory,
+  // respecting any active filters from the browse page
   useEffect(() => {
     if (!currentPath) return;
     const parentDir = currentPath.substring(0, currentPath.lastIndexOf("/")) || "/";
+    let search = "";
+    let letter: string | undefined;
+    let sort: string | undefined;
+    let sortDir: string | undefined;
+    try {
+      const raw = sessionStorage.getItem("rc-dir-state");
+      if (raw) {
+        const saved = JSON.parse(raw)[parentDir];
+        if (saved) {
+          search = saved.search || "";
+          letter = saved.letter || undefined;
+          sort = saved.sort || undefined;
+          sortDir = saved.sortDir || undefined;
+        }
+      }
+    } catch {}
     setLoading(true);
-    browse(parentDir, 1, 200)
+    browse(parentDir, 1, 200, search, letter, sort, sortDir)
       .then((data) => {
-        const imgs = data.entries.filter((e) => e.is_image);
+        const files = data.entries.filter((e) => !e.is_dir);
+        setAllFiles(files);
+        const imgs = files.filter((e) => e.is_image);
         setImages(imgs);
         const idx = imgs.findIndex((e) => e.path === currentPath);
         setCurrentIndex(idx >= 0 ? idx : 0);
@@ -46,13 +66,24 @@ export default function Gallery() {
 
   const goTo = useCallback(
     (delta: number) => {
-      setCurrentIndex((prev) => {
-        const next = prev + delta;
-        if (next < 0 || next >= images.length) return prev;
-        return next;
-      });
+      // Navigate within all files (images + videos) in directory order
+      const currentImage = images[currentIndex];
+      if (!currentImage) return;
+      const allIdx = allFiles.findIndex((e) => e.path === currentImage.path);
+      if (allIdx < 0) return;
+      const nextAllIdx = allIdx + delta;
+      if (nextAllIdx < 0 || nextAllIdx >= allFiles.length) return;
+      const nextEntry = allFiles[nextAllIdx];
+      if (nextEntry.is_image) {
+        // Find index in images array
+        const nextImgIdx = images.findIndex((e) => e.path === nextEntry.path);
+        if (nextImgIdx >= 0) setCurrentIndex(nextImgIdx);
+      } else {
+        // Navigate to video player
+        nav(`/play?path=${encodeURIComponent(nextEntry.path)}`, { replace: true });
+      }
     },
-    [images.length]
+    [images, currentIndex, allFiles, nav]
   );
 
   // Desktop: auto-hide controls on mouse move
@@ -127,7 +158,7 @@ export default function Gallery() {
     function handleKey(e: KeyboardEvent) {
       if (e.key === "ArrowLeft") { goTo(-1); }
       else if (e.key === "ArrowRight") { goTo(1); }
-      else if (e.key === "Escape") nav(-1);
+      else if (e.key === "Escape") goBack();
       else if (e.key === "f") toggleFullscreen();
     }
     window.addEventListener("keydown", handleKey);
@@ -135,8 +166,29 @@ export default function Gallery() {
   }, [goTo, nav, showControls]);
 
   const currentImage = images[currentIndex];
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < images.length - 1;
+  // Determine prev/next based on position in allFiles (not just images)
+  const allIdx = currentImage ? allFiles.findIndex((e) => e.path === currentImage.path) : -1;
+  const hasPrev = allIdx > 0;
+  const hasNext = allIdx >= 0 && allIdx < allFiles.length - 1;
+
+  function goBack() {
+    const parentDir = currentPath.substring(0, currentPath.lastIndexOf("/")) || "/";
+    const params = new URLSearchParams({ path: parentDir });
+    try {
+      const raw = sessionStorage.getItem("rc-dir-state");
+      if (raw) {
+        const saved = JSON.parse(raw)[parentDir];
+        if (saved) {
+          if (saved.page > 1) params.set("page", String(saved.page));
+          if (saved.search) params.set("search", saved.search);
+          if (saved.letter) params.set("letter", saved.letter);
+          if (saved.sort) params.set("sort", saved.sort);
+          if (saved.sortDir) params.set("dir", saved.sortDir);
+        }
+      }
+    } catch {}
+    nav(`/?${params}`);
+  }
 
   if (loading) {
     return (
@@ -157,25 +209,26 @@ export default function Gallery() {
       {/* Top bar */}
       <div
         data-controls
-        className={`absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        className={`absolute top-0 left-0 right-0 z-10 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
-        <button
-          onClick={() => nav(-1)}
-          className="text-white hover:text-gray-300 transition-colors cursor-pointer flex items-center gap-2"
-        >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-          </svg>
-          Back
-        </button>
-        <div className="flex-1" />
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="text-white text-sm truncate max-w-[300px]">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={goBack}
+            className="text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+              <path d="M19 12H5M12 19l-7-7 7-7" />
+            </svg>
+          </button>
+          <div className="flex-1" />
+          <div className="text-sm text-gray-200 truncate max-w-[50%]">
             {currentImage?.name}
           </div>
-          <div className="text-gray-400 text-sm">
-            {images.length > 0 ? `${currentIndex + 1} / ${images.length}` : ""}
-          </div>
+          {allFiles.length > 1 && allIdx >= 0 && (
+            <div className="text-sm text-gray-400 tabular-nums whitespace-nowrap">
+              {allIdx + 1} / {allFiles.length}
+            </div>
+          )}
         </div>
       </div>
 
@@ -195,7 +248,7 @@ export default function Gallery() {
       {!isTouch && hasPrev && (
         <button
           onClick={() => goTo(-1)}
-          className={`absolute left-0 top-0 bottom-0 w-16 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`absolute left-0 top-14 bottom-0 w-16 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
             <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -209,7 +262,7 @@ export default function Gallery() {
       {!isTouch && hasNext && (
         <button
           onClick={() => goTo(1)}
-          className={`absolute right-0 top-0 bottom-0 w-16 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`absolute right-0 top-14 bottom-0 w-16 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
             <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
