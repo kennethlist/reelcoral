@@ -133,9 +133,8 @@ function EpubReader({
   const progressRef = useRef(0);
   // Don't save position until the book is fully loaded and position is restored
   const positionRestoredRef = useRef(false);
-  const fullyLoadedRef = useRef(false);
 
-  // Two-phase chapter loading: show first chapter immediately, then load rest in background
+  // Load all chapters, then display
   useEffect(() => {
     let cancelled = false;
 
@@ -144,7 +143,6 @@ function EpubReader({
     setTotalPages(1);
     progressRef.current = 0;
     positionRestoredRef.current = false;
-    fullyLoadedRef.current = false;
     setLoading(true);
     setLoadProgress("Loading book info...");
 
@@ -152,41 +150,19 @@ function EpubReader({
       if (cancelled) return;
       setInfo(data);
 
-      // Phase 1: Show first/saved chapter immediately
       const saved = getPosition(path);
-      const startChapter = Math.max(0, Math.min(saved?.chapter ?? 0, data.chapter_count - 1));
-      const firstCh = await getEbookChapter(path, startChapter);
-      if (cancelled) return;
-      setHtml(firstCh.html);
-      setLoading(false);
-
-      // Phase 2: Load remaining chapters in the background
-      if (data.chapter_count <= 1) {
-        // Only one chapter — already fully loaded
-        if (settings.navMode === "scroll" && saved?.scrollY) {
-          requestAnimationFrame(() => {
-            contentRef.current?.scrollTo({ top: saved.scrollY });
-          });
-        } else if (settings.navMode === "page" && saved?.progress != null) {
-          progressRef.current = saved.progress;
-        }
-        positionRestoredRef.current = true;
-        fullyLoadedRef.current = true;
-        return;
-      }
-
-      const parts: string[] = new Array(data.chapter_count);
-      parts[startChapter] = firstCh.html;
+      const parts: string[] = [];
       for (let i = 0; i < data.chapter_count; i++) {
-        if (i === startChapter) continue;
         if (cancelled) return;
+        setLoadProgress(`Loading chapter ${i + 1} / ${data.chapter_count}...`);
         const ch = await getEbookChapter(path, i);
         if (cancelled) return;
-        parts[i] = ch.html;
+        parts.push(ch.html);
       }
 
       const fullHtml = parts.join('<hr class="epub-chapter-break" />');
       setHtml(fullHtml);
+      setLoading(false);
 
       // Restore saved position after full content is rendered
       if (settings.navMode === "scroll" && saved?.scrollY) {
@@ -197,7 +173,6 @@ function EpubReader({
         progressRef.current = saved.progress;
       }
       positionRestoredRef.current = true;
-      fullyLoadedRef.current = true;
     });
 
     return () => { cancelled = true; };
@@ -270,8 +245,8 @@ function EpubReader({
     if (!info) return;
     if (settings.navMode === "page") {
       onPageInfo(currentPage + 1, totalPages);
-      // Only save after fully loaded and position restored to avoid overwriting saved data
-      if (fullyLoadedRef.current) {
+      // Only save after position restored to avoid overwriting saved data
+      if (positionRestoredRef.current) {
         const progress = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
         progressRef.current = progress;
         const chapter = info ? Math.max(0, Math.min(Math.floor(progress * info.chapter_count), info.chapter_count - 1)) : 0;
