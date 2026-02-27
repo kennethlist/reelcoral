@@ -26,6 +26,7 @@ def create_app():
     from subtitle import subtitle_bp
     from probe import probe_bp
     from image import image_bp
+    from audio import audio_bp
     from thumbnail_select import thumbnail_select_bp
     from thumbnail_gen import thumbnail_gen_bp
 
@@ -37,6 +38,7 @@ def create_app():
     app.register_blueprint(subtitle_bp, url_prefix="/api")
     app.register_blueprint(probe_bp, url_prefix="/api/media")
     app.register_blueprint(image_bp, url_prefix="/api")
+    app.register_blueprint(audio_bp, url_prefix="/api")
     app.register_blueprint(thumbnail_gen_bp, url_prefix="/api/thumbnails")
 
     frontend_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
@@ -50,6 +52,13 @@ def create_app():
             {"name": p["name"], "video_bitrate": p.get("video_bitrate")}
             for p in config.get("transcoding", {}).get("profiles", [])
         ]
+        music_cfg = config.get("music", {})
+        music_profiles = [
+            {"name": p["name"], "bitrate": p.get("bitrate")}
+            for p in music_cfg.get("profiles", [])
+        ]
+        music_folders = config.get("media", {}).get("music_folders", [])
+
         return jsonify({
             "generate_on_fly": thumbnails_cfg.get("generate_on_fly", True),
             "profiles": profiles,
@@ -60,6 +69,8 @@ def create_app():
                 "subtitles_enabled": defaults_cfg.get("subtitles_enabled", True),
                 "subtitle_mode": defaults_cfg.get("subtitle_mode", "external"),
             },
+            "music_folders": music_folders,
+            "music_profiles": music_profiles,
         })
 
     @app.before_request

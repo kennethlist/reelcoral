@@ -78,6 +78,8 @@ export default function Gallery() {
         // Find index in images array
         const nextImgIdx = images.findIndex((e) => e.path === nextEntry.path);
         if (nextImgIdx >= 0) setCurrentIndex(nextImgIdx);
+      } else if (nextEntry.is_audio) {
+        nav(`/audio?path=${encodeURIComponent(nextEntry.path)}`, { replace: true });
       } else {
         // Navigate to video player
         nav(`/play?path=${encodeURIComponent(nextEntry.path)}`, { replace: true });

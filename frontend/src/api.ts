@@ -25,6 +25,9 @@ export interface BrowseEntry {
   path: string;
   is_dir: boolean;
   is_image?: boolean;
+  is_audio?: boolean;
+  is_album?: boolean;
+  cover_art?: string;
   size?: number;
   mtime?: number;
 }
@@ -41,6 +44,9 @@ export interface BrowseResult {
   limit: number;
   breadcrumbs: Breadcrumb[];
   letters: string[];
+  is_music_context?: boolean;
+  is_music_folder?: boolean;
+  cover_art?: string;
 }
 
 export async function browse(
@@ -258,6 +264,8 @@ export interface AppConfig {
     subtitles_enabled: boolean;
     subtitle_mode: string;
   };
+  music_folders: string[];
+  music_profiles: { name: string; bitrate?: string }[];
 }
 
 export async function getConfig(): Promise<AppConfig> {
@@ -270,4 +278,8 @@ export async function deleteAllThumbnails(): Promise<{ deleted: number; failed: 
   const res = await fetch("/api/thumbnails/delete-all", { method: "POST" });
   if (!res.ok) throw new Error("Delete failed");
   return res.json();
+}
+
+export function audioUrl(path: string, profile = "Original"): string {
+  return `/api/audio?path=${encodeURIComponent(path)}&profile=${encodeURIComponent(profile)}`;
 }

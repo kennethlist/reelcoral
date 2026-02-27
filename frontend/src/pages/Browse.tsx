@@ -1,11 +1,24 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, logout, getConfig, BrowseResult } from "../api";
+import { browse, logout, getConfig, BrowseResult, BrowseEntry } from "../api";
 import VideoCard from "../components/VideoCard";
 import Breadcrumbs from "../components/Breadcrumbs";
 import SearchBar from "../components/SearchBar";
 import Pagination from "../components/Pagination";
 import ThumbnailPicker from "../components/ThumbnailPicker";
+import { useMusicPlayer, type MusicTrack } from "../hooks/useMusicPlayer";
+
+function formatSize(bytes?: number): string {
+  if (!bytes) return "";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  let size = bytes;
+  while (size >= 1024 && i < units.length - 1) {
+    size /= 1024;
+    i++;
+  }
+  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
 
 const DIR_STATE_KEY = "rc-dir-state";
 const SCROLL_STATE_KEY = "rc-scroll-state";
@@ -119,6 +132,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigate();
   const [generateOnFly, setGenerateOnFly] = useState(true);
+  const music = useMusicPlayer();
   const currentPath = searchParams.get("path") || "/";
   const currentPage = Number(searchParams.get("page") || "1");
   const currentSearch = searchParams.get("search") || "";
@@ -218,15 +232,62 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     setSearchParams(params);
   }
 
-  function handleEntryClick(entry: { path: string; is_dir: boolean; is_image?: boolean }) {
+  function buildPlaylist(entries: BrowseEntry[], albumName?: string, coverArt?: string): MusicTrack[] {
+    return entries
+      .filter((e) => !e.is_dir && e.is_audio)
+      .map((e) => ({
+        name: e.name,
+        path: e.path,
+        albumName,
+        coverArt,
+      }));
+  }
+
+  function handlePlayAll() {
+    if (!data) return;
+    const albumName = data.breadcrumbs[data.breadcrumbs.length - 1]?.name;
+    const tracks = buildPlaylist(data.entries, albumName, data.cover_art);
+    if (tracks.length > 0) music.playAll(tracks, 0);
+  }
+
+  // Play All from an album folder card (fetches that folder's contents)
+  const handlePlayAlbum = useCallback(async (albumEntry: BrowseEntry) => {
+    try {
+      const result = await browse(albumEntry.path, 1, 200);
+      const albumName = albumEntry.name;
+      const coverArt = albumEntry.cover_art || result.cover_art;
+      const tracks = result.entries
+        .filter((e) => !e.is_dir && e.is_audio)
+        .map((e) => ({
+          name: e.name,
+          path: e.path,
+          albumName,
+          coverArt,
+        }));
+      if (tracks.length > 0) music.playAll(tracks, 0);
+    } catch {}
+  }, [music]);
+
+  function handleEntryClick(entry: BrowseEntry) {
     if (entry.is_dir) {
       navigate(entry.path);
+    } else if (entry.is_audio && data?.is_music_folder) {
+      const albumName = data.breadcrumbs[data.breadcrumbs.length - 1]?.name;
+      music.playSingle({
+        name: entry.name,
+        path: entry.path,
+        albumName,
+        coverArt: data.cover_art,
+      });
     } else {
       // Save dir state and scroll position before leaving browse page
       saveDirState(currentPath, currentDirState());
       saveScrollPos(currentPath, window.scrollY);
+      if (music.isVisible) music.dismiss();
       if (entry.is_image) {
         nav(`/gallery?path=${encodeURIComponent(entry.path)}`);
+      } else if (entry.is_audio) {
+        nav(`/audio?path=${encodeURIComponent(entry.path)}`);
       } else {
         nav(`/play?path=${encodeURIComponent(entry.path)}`);
       }
@@ -254,7 +315,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className={`min-h-screen ${music.isVisible ? "pb-20" : ""}`}>
       <header className="sticky top-0 bg-gray-950/90 backdrop-blur border-b border-gray-800 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] z-10">
         <div className="w-full flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 min-w-0">
@@ -330,8 +391,143 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
 
-        {data && data.entries.length > 0 && (
+        {data && data.entries.length > 0 && data.is_music_folder && (
           <>
+            {/* Album level: Play All header + song list */}
+            <div className="mb-4 flex items-center gap-3">
+              {data.cover_art && (
+                <img
+                  src={`/api/image?path=${encodeURIComponent(data.cover_art)}`}
+                  alt=""
+                  className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <h2 className="text-lg font-semibold text-white truncate">
+                  {data.breadcrumbs[data.breadcrumbs.length - 1]?.name}
+                </h2>
+                <div className="text-xs text-gray-400">
+                  {data.entries.filter((e) => e.is_audio).length} tracks
+                </div>
+              </div>
+              <button
+                onClick={handlePlayAll}
+                className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white px-4 py-2 rounded-lg transition-colors cursor-pointer text-sm font-medium flex-shrink-0"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+                Play All
+              </button>
+            </div>
+            <div className="flex flex-col rounded-lg overflow-hidden mr-8">
+              {data.entries.filter((e) => e.is_audio).map((entry, i) => {
+                const isCurrentTrack = music.isVisible && music.playlist[music.currentIndex]?.path === entry.path;
+                return (
+                  <div
+                    key={entry.path}
+                    className={`flex items-center gap-3 px-4 py-3 transition-colors group/row ${
+                      isCurrentTrack ? "bg-blue-600/20 text-white" : `${i % 2 === 0 ? "bg-gray-900" : "bg-gray-900/60"} hover:bg-gray-800 text-gray-300 hover:text-white`
+                    }`}
+                  >
+                    <button
+                      onClick={() => handleEntryClick(entry)}
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer"
+                    >
+                      <span className="w-8 text-center text-xs text-gray-500 flex-shrink-0">
+                        {isCurrentTrack && music.isPlaying ? (
+                          <span className="inline-flex items-end gap-0.5 h-3">
+                            <span className="w-0.5 bg-blue-400 rounded-sm animate-[eq1_0.8s_ease-in-out_infinite]" style={{ height: "60%" }} />
+                            <span className="w-0.5 bg-blue-400 rounded-sm animate-[eq2_0.6s_ease-in-out_infinite]" style={{ height: "100%" }} />
+                            <span className="w-0.5 bg-blue-400 rounded-sm animate-[eq3_0.7s_ease-in-out_infinite]" style={{ height: "40%" }} />
+                            <style>{`
+                              @keyframes eq1 { 0%, 100% { height: 60%; } 50% { height: 20%; } }
+                              @keyframes eq2 { 0%, 100% { height: 100%; } 50% { height: 30%; } }
+                              @keyframes eq3 { 0%, 100% { height: 40%; } 50% { height: 80%; } }
+                            `}</style>
+                          </span>
+                        ) : (
+                          i + 1
+                        )}
+                      </span>
+                      <span className="flex-1 text-sm truncate">{entry.name}</span>
+                    </button>
+                    {entry.size != null && (
+                      <span className="text-xs text-gray-500 flex-shrink-0">{formatSize(entry.size)}</span>
+                    )}
+                    <button
+                      onClick={() => handleEntryClick(entry)}
+                      className="text-gray-500 hover:text-white transition-colors cursor-pointer p-1 flex-shrink-0 opacity-0 group-hover/row:opacity-100"
+                      title="Play"
+                    >
+                      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M8 5v14l11-7z" />
+                      </svg>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {data && data.entries.length > 0 && !data.is_music_folder && data.is_music_context && (() => {
+          const hasAlbums = data.entries.some((e) => e.is_album);
+          return hasAlbums ? (
+            <>
+              {/* Album grid (1:1 square cards with cover art) */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pr-8">
+                {data.entries.map((entry) => (
+                  <VideoCard
+                    key={entry.path}
+                    entry={entry}
+                    onClick={() => handleEntryClick(entry)}
+                    onPlayAll={entry.is_dir ? () => handlePlayAlbum(entry) : undefined}
+                    thumbVersion={thumbVersion}
+                    generateOnFly={generateOnFly}
+                    musicMode
+                    coverArt={entry.cover_art}
+                  />
+                ))}
+              </div>
+              <Pagination
+                page={data.page}
+                total={data.total}
+                limit={data.limit}
+                onPageChange={handlePageChange}
+              />
+            </>
+          ) : (
+            <>
+              {/* Artist list (no albums at this level) */}
+              <div className="flex flex-col rounded-lg overflow-hidden mr-8">
+                {data.entries.map((entry, i) => (
+                  <div
+                    key={entry.path}
+                    className={`flex items-center gap-3 px-4 py-3 ${i % 2 === 0 ? "bg-gray-900" : "bg-gray-900/60"} hover:bg-gray-800 text-gray-300 hover:text-white transition-colors group/row`}
+                  >
+                    <button
+                      onClick={() => handleEntryClick(entry)}
+                      className="flex items-center flex-1 min-w-0 text-left cursor-pointer"
+                    >
+                      <span className="flex-1 text-sm truncate">{entry.name}</span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <Pagination
+                page={data.page}
+                total={data.total}
+                limit={data.limit}
+                onPageChange={handlePageChange}
+              />
+            </>
+          );
+        })()}
+
+        {data && data.entries.length > 0 && !data.is_music_folder && !data.is_music_context && (
+          <>
+            {/* Normal grid for non-music content */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pr-8">
               {data.entries.map((entry) => (
                 <VideoCard
@@ -355,7 +551,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
         {/* A-Z sidebar — fixed to right edge, fits between header and bottom */}
         {data && (data.entries.length > 0 || activeLetter) && (
-          <div className="fixed right-1 top-[52px] bottom-0 z-20 flex flex-col items-center justify-evenly py-4">
+          <div className={`fixed right-1 top-[52px] ${music.isVisible ? "bottom-16" : "bottom-0"} z-20 flex flex-col items-center justify-evenly py-4`}>
             {"ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("").map((letter) => {
               const isAvailable = availableLetters.has(letter);
               return (

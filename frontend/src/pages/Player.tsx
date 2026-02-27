@@ -156,6 +156,8 @@ export default function Player() {
     const entry = siblings[nextIdx];
     if (entry.is_image) {
       navigate(`/gallery?path=${encodeURIComponent(entry.path)}`, { replace: true });
+    } else if (entry.is_audio) {
+      navigate(`/audio?path=${encodeURIComponent(entry.path)}`, { replace: true });
     } else {
       // Navigate to another video — update search params to trigger re-init
       setSearchParams({ path: entry.path }, { replace: true });

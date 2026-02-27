@@ -4,7 +4,8 @@ server:
 
 media:
   root: "/media"
-  extensions: [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".wmv", ".flv", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"]
+  extensions: [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".wmv", ".flv", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus"]
+  music_folders: ["/music"]
 
 transcoding:
   hardware: "vaapi"           # "vaapi", "qsv", or "software"
@@ -48,6 +49,22 @@ transcoding:
       video_bitrate: "500k"
       audio_bitrate: "64k"
     - name: "original"
+
+music:
+  profiles:
+    - name: "Original"
+    - name: "320kbps"
+      bitrate: "320k"
+    - name: "256kbps"
+      bitrate: "256k"
+    - name: "192kbps"
+      bitrate: "192k"
+    - name: "128kbps"
+      bitrate: "128k"
+    - name: "96kbps"
+      bitrate: "96k"
+    - name: "64kbps"
+      bitrate: "64k"
 
 thumbnails:
   generate_on_fly: true
