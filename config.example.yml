@@ -78,6 +78,7 @@ defaults:
   subtitle_mode: "external"
   thumbnail_candidates: 3    # 3, 6, or 9
   grid_size: "small"         # "small" or "large"
+  page_size: 24              # 12, 24, 36, 48, or 60
   book_font: "Ubuntu"
   book_font_weight: 400      # 100-900
 

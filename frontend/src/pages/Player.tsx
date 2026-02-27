@@ -465,26 +465,28 @@ export default function Player() {
 
   // Click handler: mobile toggles overlay, desktop toggles play/pause
   const handleVideoClick = useCallback((e: React.MouseEvent) => {
-    if ((e.target as HTMLElement).closest("[data-controls]")) return;
+    const target = e.target as HTMLElement;
+    // Ignore clicks on interactive controls (buttons, inputs, seek bar, settings)
+    if (target.closest("button") || target.closest("input") || target.closest("select") || target.closest("[data-controls-inner]")) return;
     if ("ontouchend" in window) {
       // Mobile: tap to toggle overlay visibility (does NOT pause/play)
       const video = videoRef.current;
       if (!video) return;
       // When paused, overlay stays visible — don't allow dismissing
       if (video.paused) return;
-      setControlsVisible((v) => {
-        if (!v) {
-          scheduleHide(3000);
-        } else {
-          if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-        }
-        return !v;
-      });
+      if (controlsVisible) {
+        // Dismiss immediately
+        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+        setControlsVisible(false);
+      } else {
+        setControlsVisible(true);
+        scheduleHide(3000);
+      }
     } else {
       // Desktop: click empty area to toggle play/pause
       togglePlayPause();
     }
-  }, [scheduleHide]);
+  }, [scheduleHide, controlsVisible]);
 
   // Close settings when clicking outside
   useEffect(() => {

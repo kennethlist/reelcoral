@@ -78,6 +78,7 @@ def create_app():
                 "subtitle_mode": defaults_cfg.get("subtitle_mode", "external"),
                 "thumbnail_candidates": defaults_cfg.get("thumbnail_candidates", 3),
                 "grid_size": defaults_cfg.get("grid_size", "small"),
+                "page_size": defaults_cfg.get("page_size", 24),
                 "book_font": defaults_cfg.get("book_font", "serif"),
                 "book_font_weight": defaults_cfg.get("book_font_weight", 400),
             },

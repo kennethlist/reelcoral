@@ -186,6 +186,14 @@ function AccountMenu({ onLogout, prefs, setPrefs, config }: {
                 <option value="large">Large</option>
               </select>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-400">Page Size</span>
+              <select value={prefs.page_size} onChange={(e) => setPrefs({ page_size: Number(e.target.value) })} className={selectClass}>
+                {[12, 24, 36, 48, 60].map((n) => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="border-t border-gray-700 my-1" />
           <button
@@ -244,7 +252,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     setError("");
-    browse(currentPath, currentPage, 50, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
+    browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
       .then((result) => {
         setData(result);
         // Restore scroll position if returning from player/gallery
@@ -254,7 +262,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         }
       })
       .catch(() => setError("Failed to load directory"));
-  }, [currentPath, currentPage, currentSearch, activeLetter, currentSort, currentSortDir]);
+  }, [currentPath, currentPage, prefs.page_size, currentSearch, activeLetter, currentSort, currentSortDir]);
 
   function addSortParams(params: Record<string, string>, sort = currentSort, dir = currentSortDir) {
     if (sort !== "alpha") params.sort = sort;
@@ -455,6 +463,22 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
                 </svg>
               )}
             </button>
+            <select
+              value={prefs.page_size}
+              onChange={(e) => {
+                setPrefs({ page_size: Number(e.target.value) });
+                const params: Record<string, string> = { path: currentPath };
+                if (currentSearch) params.search = currentSearch;
+                if (activeLetter) params.letter = activeLetter;
+                addSortParams(params);
+                setSearchParams(params);
+              }}
+              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+            >
+              {[12, 24, 36, 48, 60].map((n) => (
+                <option key={n} value={n}>{n} / page</option>
+              ))}
+            </select>
           </div>
         </div>
 

@@ -12,6 +12,7 @@ export interface Preferences {
   subtitle_font_size: SubtitleFontSize;
   thumbnail_candidates: 3 | 6 | 9;
   grid_size: "small" | "large";
+  page_size: number;
 }
 
 const STORAGE_KEY = "media_preferences";
@@ -25,6 +26,7 @@ const hardcodedDefaults: Preferences = {
   subtitle_font_size: "medium",
   thumbnail_candidates: 3,
   grid_size: "small",
+  page_size: 24,
 };
 
 function load(defaults: Preferences): Preferences {
@@ -50,6 +52,7 @@ export function usePreferences() {
           subtitle_font_size: "medium",
           thumbnail_candidates: (cfg.defaults.thumbnail_candidates || 3) as 3 | 6 | 9,
           grid_size: (cfg.defaults.grid_size || "small") as "small" | "large",
+          page_size: cfg.defaults.page_size || 24,
         };
         // Re-load: localStorage overrides take precedence over server defaults
         setPrefsState(load(serverDefaults));
