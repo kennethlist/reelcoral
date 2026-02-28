@@ -10,6 +10,37 @@ _TS_RE = re.compile(
     r"((?:\d{2}:)?\d{2}:\d{2}\.\d{3})\s*-->\s*((?:\d{2}:)?\d{2}:\d{2}\.\d{3})"
 )
 
+# Regex to strip HTML tags (keep inner text)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+# Lines that are entirely bracketed annotations or music symbols
+_JUNK_LINE_RE = re.compile(
+    r"^\s*(?:"
+    r"\[.*\]"       # [music], [laughing], etc.
+    r"|\(.*\)"      # (music), (laughing), etc.
+    r"|\{.*\}"      # {music}, etc.
+    r"|[♪♫♬♩\s]+"   # music symbols only
+    r")\s*$"
+)
+# Inline bracketed annotations to strip from mixed lines
+_INLINE_ANNOTATION_RE = re.compile(r"\[.*?\]|\(.*?\)|\{.*?\}")
+
+
+def _clean_sub_text(text: str) -> str:
+    """Remove non-dialog junk from subtitle text."""
+    # Strip HTML tags, keep inner text
+    text = _HTML_TAG_RE.sub("", text)
+    # Process line by line
+    cleaned = []
+    for line in text.split("\n"):
+        # Skip lines that are entirely junk
+        if _JUNK_LINE_RE.match(line):
+            continue
+        # Strip inline annotations from mixed lines
+        line = _INLINE_ANNOTATION_RE.sub("", line).strip()
+        if line:
+            cleaned.append(line)
+    return "\n".join(cleaned)
+
 
 def _parse_ts(ts: str) -> float:
     """Parse 'HH:MM:SS.mmm' or 'MM:SS.mmm' to seconds."""
@@ -101,7 +132,7 @@ def subtitle():
                         text_lines.append(line)
                     elif _TS_RE.search(line):
                         found_ts = True
-                text = "\n".join(text_lines).strip()
+                text = _clean_sub_text("\n".join(text_lines).strip())
                 if text:
                     cues.append({"start": round(start, 3), "end": round(end, 3), "text": text})
             return jsonify(cues)

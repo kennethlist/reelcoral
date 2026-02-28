@@ -451,10 +451,19 @@ export default function Player() {
     }
   }, [paused, settingsOpen, scheduleHide]);
 
-  const handleMouseMove = useCallback(() => {
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if ("ontouchend" in window) return; // Ignore phantom mouse events on touch devices
-    showControls();
-  }, [showControls]);
+    const target = e.target as HTMLElement;
+    const overControls = target.closest("[data-controls]") || target.closest("[data-controls-inner]");
+    setControlsVisible(true);
+    if (overControls) {
+      // Over controls: keep visible, don't schedule hide
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    } else {
+      // Over empty area: schedule auto-hide
+      scheduleHide();
+    }
+  }, [scheduleHide]);
 
   const handleMouseLeave = useCallback(() => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);

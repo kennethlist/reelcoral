@@ -176,6 +176,51 @@ export default function AudioPlayer() {
     return () => document.removeEventListener("keydown", handler);
   }, [goToSibling]);
 
+  // MediaSession API — enables background audio & lock screen controls
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !filePath) return;
+
+    const trackName = fileName.replace(/\.[^/.]+$/, "");
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: trackName,
+      artist: "",
+    });
+
+    navigator.mediaSession.setActionHandler("play", () => {
+      audioRef.current?.play().catch(() => {});
+    });
+    navigator.mediaSession.setActionHandler("pause", () => {
+      audioRef.current?.pause();
+    });
+    navigator.mediaSession.setActionHandler("nexttrack", hasNext ? () => goToSibling(1) : null);
+    navigator.mediaSession.setActionHandler("previoustrack", hasPrev ? () => goToSibling(-1) : null);
+    navigator.mediaSession.setActionHandler("seekto", (details) => {
+      if (details.seekTime != null && audioRef.current) {
+        audioRef.current.currentTime = details.seekTime;
+      }
+    });
+  }, [filePath, fileName, hasNext, hasPrev, goToSibling]);
+
+  // MediaSession playback state
+  useEffect(() => {
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+    }
+  }, [isPlaying]);
+
+  // MediaSession position state
+  useEffect(() => {
+    if ("mediaSession" in navigator && duration > 0 && isFinite(duration)) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration,
+          position: Math.min(currentTime, duration),
+          playbackRate: 1,
+        });
+      } catch {}
+    }
+  }, [currentTime, duration]);
+
   // Close quality dropdown on outside click
   useEffect(() => {
     if (!showQuality) return;

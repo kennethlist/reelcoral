@@ -134,7 +134,10 @@ function EpubReader({
   // Don't save position until the book is fully loaded and position is restored
   const positionRestoredRef = useRef(false);
 
-  // Load all chapters, then display
+  // Track whether all chapters are loaded (for hiding pagination until ready)
+  const [fullyLoaded, setFullyLoaded] = useState(false);
+
+  // Load chapters progressively: show chapter 0 immediately, continue in background
   useEffect(() => {
     let cancelled = false;
 
@@ -143,6 +146,7 @@ function EpubReader({
     setTotalPages(1);
     progressRef.current = 0;
     positionRestoredRef.current = false;
+    setFullyLoaded(false);
     setLoading(true);
     setLoadProgress("Loading book info...");
 
@@ -153,31 +157,44 @@ function EpubReader({
       const saved = getPosition(path);
       const count = data.chapter_count;
       const parts: string[] = new Array(count);
-      const BATCH = 5;
-      for (let start = 0; start < count; start += BATCH) {
+
+      // If restoring to a later chapter, we need to load up to that point before displaying
+      const savedChapter = saved?.chapter ?? 0;
+      const needsDeepRestore = savedChapter > 0 && saved?.progress != null;
+      const showAfterChapter = needsDeepRestore ? savedChapter : 0;
+
+      for (let i = 0; i < count; i++) {
         if (cancelled) return;
-        const end = Math.min(start + BATCH, count);
-        setLoadProgress(`Loading chapters ${start + 1}–${end} / ${count}...`);
-        const batch = await Promise.all(
-          Array.from({ length: end - start }, (_, j) => getEbookChapter(path, start + j))
-        );
+        setLoadProgress(`Loading chapter ${i + 1} / ${count}...`);
+        const chapter = await getEbookChapter(path, i);
         if (cancelled) return;
-        for (let j = 0; j < batch.length; j++) parts[start + j] = batch[j].html;
+        parts[i] = chapter.html;
+
+        // Show content as soon as we've loaded enough
+        if (i >= showAfterChapter && loading) {
+          const loadedHtml = parts.slice(0, i + 1).join('<hr class="epub-chapter-break" />');
+          setHtml(loadedHtml);
+          setLoading(false);
+
+          // Restore saved position
+          if (settings.navMode === "scroll" && saved?.scrollY) {
+            requestAnimationFrame(() => {
+              contentRef.current?.scrollTo({ top: saved.scrollY });
+            });
+          } else if (settings.navMode === "page" && saved?.progress != null) {
+            progressRef.current = saved.progress;
+          }
+          positionRestoredRef.current = true;
+        } else if (i >= showAfterChapter && !cancelled) {
+          // Update HTML with newly loaded chapters (background loading)
+          const loadedHtml = parts.slice(0, i + 1).join('<hr class="epub-chapter-break" />');
+          setHtml(loadedHtml);
+        }
       }
 
-      const fullHtml = parts.join('<hr class="epub-chapter-break" />');
-      setHtml(fullHtml);
-      setLoading(false);
-
-      // Restore saved position after full content is rendered
-      if (settings.navMode === "scroll" && saved?.scrollY) {
-        requestAnimationFrame(() => {
-          contentRef.current?.scrollTo({ top: saved.scrollY });
-        });
-      } else if (settings.navMode === "page" && saved?.progress != null) {
-        progressRef.current = saved.progress;
+      if (!cancelled) {
+        setFullyLoaded(true);
       }
-      positionRestoredRef.current = true;
     });
 
     return () => { cancelled = true; };
@@ -272,7 +289,7 @@ function EpubReader({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!info || settings.navMode !== "page") return;
-    onPageInfo(currentPage + 1, totalPages);
+    onPageInfo(currentPage + 1, fullyLoaded ? totalPages : 0);
     // Update progress ref immediately (used for resize repositioning)
     progressRef.current = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
     // Debounce the localStorage write
@@ -851,6 +868,7 @@ export default function Reader() {
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const suppressShowUntilRef = useRef(0); // timestamp to suppress showControls after click-toggle
   const containerRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
 
   const [settings, setSettings] = useState<ReaderSettings>(loadSettings);
 
@@ -960,9 +978,24 @@ export default function Reader() {
     }
   }, [showControls, isTouch]);
 
-  const handleMouseMove = useCallback(() => {
-    if (!isTouch) showControls();
-  }, [showControls, isTouch]);
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isTouch) return;
+    const target = e.target as HTMLElement;
+    const overControls = target.closest("[data-controls]");
+    // Don't auto-show if a click-toggle just happened (prevents flicker)
+    if (Date.now() < suppressShowUntilRef.current) return;
+    setControlsVisible(true);
+    if (overControls) {
+      // Over controls: keep visible, don't schedule hide
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    } else {
+      // Over empty area: schedule auto-hide
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = setTimeout(() => {
+        if (!settingsOpen && !pageInputFocused) setControlsVisible(false);
+      }, 500);
+    }
+  }, [isTouch, settingsOpen, pageInputFocused]);
 
   const handleMouseLeave = useCallback(() => {
     if (!isTouch && !settingsOpen && !pageInputFocused) {
@@ -985,6 +1018,22 @@ export default function Reader() {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     }
   }, [pageInputFocused]);
+
+  // Close settings when clicking/tapping outside
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const handler = (e: Event) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler);
+    };
+  }, [settingsOpen]);
 
   // Note: tap zones (transparent overlay divs) handle all tap/click navigation
   // and overlay toggling — see the JSX below. No manual touch/click handlers needed.
@@ -1294,12 +1343,14 @@ export default function Reader() {
 
       {/* Settings panel */}
       {settingsOpen && (
-        <SettingsPanel
-          format={format}
-          settings={settings}
-          onChange={setSettings}
-          onClose={() => setSettingsOpen(false)}
-        />
+        <div ref={settingsRef}>
+          <SettingsPanel
+            format={format}
+            settings={settings}
+            onChange={setSettings}
+            onClose={() => setSettingsOpen(false)}
+          />
+        </div>
       )}
 
       {/* EPUB global styles */}

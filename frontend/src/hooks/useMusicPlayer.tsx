@@ -179,6 +179,58 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     setDuration(0);
   }, []);
 
+  // MediaSession API — enables background audio & lock screen controls
+  useEffect(() => {
+    if (!("mediaSession" in navigator) || !currentTrack) return;
+
+    const trackName = currentTrack.name.replace(/\.[^/.]+$/, "");
+    const artworkList: MediaImage[] = currentTrack.coverArt
+      ? [{ src: `/api/image?path=${encodeURIComponent(currentTrack.coverArt)}`, sizes: "512x512", type: "image/jpeg" }]
+      : [];
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: trackName,
+      artist: currentTrack.albumName || "",
+      artwork: artworkList,
+    });
+
+    navigator.mediaSession.setActionHandler("play", () => {
+      audioRef.current?.play().catch(() => {});
+      setIsPlaying(true);
+    });
+    navigator.mediaSession.setActionHandler("pause", () => {
+      audioRef.current?.pause();
+      setIsPlaying(false);
+    });
+    navigator.mediaSession.setActionHandler("nexttrack", () => next());
+    navigator.mediaSession.setActionHandler("previoustrack", () => prev());
+    navigator.mediaSession.setActionHandler("seekto", (details) => {
+      if (details.seekTime != null && audioRef.current) {
+        audioRef.current.currentTime = details.seekTime;
+      }
+    });
+  }, [currentTrack?.path, currentTrack?.name, currentTrack?.albumName, currentTrack?.coverArt, next, prev]);
+
+  // MediaSession playback state
+  useEffect(() => {
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+    }
+  }, [isPlaying]);
+
+  // MediaSession position state
+  useEffect(() => {
+    if ("mediaSession" in navigator && duration > 0 && isFinite(duration)) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration,
+          position: Math.min(currentTime, duration),
+          playbackRate: 1,
+        });
+      } catch {}
+    }
+  }, [currentTime, duration]);
+
   // Auto-advance on track end (only when playAll was used)
   const handleEnded = useCallback(() => {
     if (!autoAdvance) {

@@ -315,6 +315,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   function handleSortChange(sort: string, dir: string) {
     const params: Record<string, string> = { path: currentPath };
+    if (currentPage > 1) params.page = String(currentPage);
     if (currentSearch) params.search = currentSearch;
     if (activeLetter) params.letter = activeLetter;
     addSortParams(params, sort, dir);
