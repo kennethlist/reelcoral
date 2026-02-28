@@ -227,22 +227,37 @@ function EpubReader({
     return () => cancelAnimationFrame(id);
   }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, countPages]);
 
-  // Window resize listener — recalculate page dimensions on any resize
+  // Window resize listener — recalculate page dimensions on any resize (debounced)
   useEffect(() => {
     if (settings.navMode !== "page") return;
-    const onResize = () => measureSize();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => measureSize(), 150);
+    };
     window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (timer) clearTimeout(timer);
+    };
   }, [settings.navMode, measureSize]);
 
-  // Recount pages when embedded images finish loading (they affect column layout)
+  // Recount pages when embedded images finish loading (they affect column layout).
+  // Debounced: many images loading in quick succession only trigger one recount.
+  const imgTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (settings.navMode !== "page" || !innerRef.current || !html) return;
     const imgs = innerRef.current.querySelectorAll("img");
     if (imgs.length === 0) return;
-    const onLoad = () => countPages();
+    const onLoad = () => {
+      if (imgTimerRef.current) clearTimeout(imgTimerRef.current);
+      imgTimerRef.current = setTimeout(() => countPages(), 200);
+    };
     imgs.forEach((img) => img.addEventListener("load", onLoad));
-    return () => imgs.forEach((img) => img.removeEventListener("load", onLoad));
+    return () => {
+      imgs.forEach((img) => img.removeEventListener("load", onLoad));
+      if (imgTimerRef.current) clearTimeout(imgTimerRef.current);
+    };
   }, [html, settings.navMode, countPages]);
 
   // Apply page transform directly on the DOM element (avoids React re-rendering the
