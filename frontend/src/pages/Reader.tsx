@@ -165,48 +165,36 @@ function EpubReader({
       const count = data.chapter_count;
       const parts: string[] = new Array(count);
 
-      // If restoring to a later chapter, we need to load up to that point before displaying
-      const savedChapter = saved?.chapter ?? 0;
-      const needsDeepRestore = savedChapter > 0 && saved?.progress != null;
-      const showAfterChapter = needsDeepRestore ? savedChapter : 0;
-
       for (let i = 0; i < count; i++) {
         if (cancelled) return;
         setLoadProgress(`Loading chapter ${i + 1} / ${count}...`);
         const chapter = await getEbookChapter(path, i);
         if (cancelled) return;
         parts[i] = chapter.html;
-
-        // Show content as soon as we've loaded enough
-        if (i >= showAfterChapter && loading) {
-          const loadedHtml = parts.slice(0, i + 1).join('<hr class="epub-chapter-break" />');
-          setHtml(loadedHtml);
-          setLoading(false);
-
-          // Restore saved position
-          if (settings.navMode === "scroll" && saved?.scrollY) {
-            requestAnimationFrame(() => {
-              contentRef.current?.scrollTo({ top: saved.scrollY });
-              requestAnimationFrame(() => setContentReady(true));
-            });
-          } else if (settings.navMode === "page" && saved?.progress != null) {
-            progressRef.current = saved.progress;
-            // contentReady will be set after countPages runs (see below)
-          } else {
-            // No position to restore — show immediately
-            setContentReady(true);
-          }
-          positionRestoredRef.current = true;
-        } else if (i >= showAfterChapter && !cancelled) {
-          // Update HTML with newly loaded chapters (background loading)
-          const loadedHtml = parts.slice(0, i + 1).join('<hr class="epub-chapter-break" />');
-          setHtml(loadedHtml);
-        }
       }
+      if (cancelled) return;
 
-      if (!cancelled) {
-        setFullyLoaded(true);
+      // All chapters loaded — set HTML once and restore position
+      const fullHtml = parts.join('<hr class="epub-chapter-break" />');
+      setHtml(fullHtml);
+      setFullyLoaded(true);
+
+      // Restore saved position
+      if (settings.navMode === "scroll" && saved?.scrollY) {
+        setLoading(false);
+        requestAnimationFrame(() => {
+          contentRef.current?.scrollTo({ top: saved.scrollY });
+          requestAnimationFrame(() => setContentReady(true));
+        });
+      } else if (settings.navMode === "page" && saved?.progress != null) {
+        progressRef.current = saved.progress;
+        setLoading(false);
+        // contentReady will be set after countPages runs
+      } else {
+        setLoading(false);
+        setContentReady(true);
       }
+      positionRestoredRef.current = true;
     });
 
     return () => { cancelled = true; };
@@ -544,9 +532,9 @@ function ImagePageReader({
     return comicPageUrl(path, currentPage);
   }, [path, currentPage, format, settings.pdfFit, containerSize]);
 
-  // Preload nearby pages (prev 1, next 2)
+  // Preload nearby pages (prev 1, next 4)
   useEffect(() => {
-    const pagesToPreload = [currentPage - 1, currentPage + 1, currentPage + 2];
+    const pagesToPreload = [currentPage - 1, currentPage + 1, currentPage + 2, currentPage + 3, currentPage + 4];
     for (const p of pagesToPreload) {
       if (p >= 0 && p < pageCount) {
         const img = new Image();
