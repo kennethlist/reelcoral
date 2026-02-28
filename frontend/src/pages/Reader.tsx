@@ -336,6 +336,48 @@ function EpubReader({
   };
   const bgStyle = bgMap[settings.epubBg];
 
+  // Memoize the heavy content so page-flip state changes (currentPage) don't
+  // cause React to re-evaluate or re-apply styles on the massive HTML content.
+  // Only re-render when layout-affecting values actually change.
+  const isPageFlip = settings.navMode === "page";
+  const memoizedContent = useMemo(() => {
+    if (isPageFlip) {
+      return (
+        <div ref={wrapperRef} style={{ overflow: "hidden", height: "100%", ["--epub-page-height" as string]: contentHeight > 0 ? `${contentHeight}px` : "100%" }}>
+          <div
+            ref={innerRef}
+            className="epub-content"
+            style={{
+              height: "100%",
+              columnWidth: `${contentWidth || 9999}px`,
+              columnGap: 0,
+              columnFill: "auto" as const,
+            }}
+            dangerouslySetInnerHTML={{ __html: html }}
+          />
+        </div>
+      );
+    }
+    return (
+      <div
+        ref={innerRef}
+        className="epub-content max-w-3xl mx-auto"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+    );
+  }, [html, isPageFlip, contentWidth, contentHeight]);
+
+  const containerStyle = useMemo(() => ({
+    backgroundColor: bgStyle.bg,
+    color: bgStyle.color,
+    padding: `2rem ${marginMap[settings.epubMargin]} 1rem`,
+    fontSize: `${settings.epubFontSize}px`,
+    fontFamily: settings.epubFontFamily,
+    fontWeight: settings.epubFontWeight,
+    lineHeight: settings.epubLineHeight,
+    ...(isPageFlip ? { maxWidth: "56rem", margin: "0 auto", width: "100%" } : {}),
+  }), [bgStyle, settings.epubMargin, settings.epubFontSize, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, isPageFlip]);
+
   if (loading) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
@@ -344,51 +386,19 @@ function EpubReader({
     );
   }
 
-  const isPageFlip = settings.navMode === "page";
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative">
       {/* Content */}
       <div
         ref={contentRef}
         className={`flex-1 ${isPageFlip ? "overflow-hidden" : "overflow-y-auto"}`}
-        style={{
-          backgroundColor: bgStyle.bg,
-          color: bgStyle.color,
-          padding: `2rem ${marginMap[settings.epubMargin]} 1rem`,
-          fontSize: `${settings.epubFontSize}px`,
-          fontFamily: settings.epubFontFamily,
-          fontWeight: settings.epubFontWeight,
-          lineHeight: settings.epubLineHeight,
-          ...(isPageFlip ? { maxWidth: "56rem", margin: "0 auto", width: "100%" } : {}),
-        }}
+        style={containerStyle}
         onScroll={handleScroll}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("a")) e.preventDefault();
         }}
       >
-        {isPageFlip ? (
-          /* Clipping wrapper — sits inside padding, clips column overflow at content edge */
-          <div ref={wrapperRef} style={{ overflow: "hidden", height: "100%", ["--epub-page-height" as string]: contentHeight > 0 ? `${contentHeight}px` : "100%" }}>
-            <div
-              ref={innerRef}
-              className="epub-content"
-              style={{
-                height: "100%",
-                columnWidth: `${contentWidth || 9999}px`,
-                columnGap: 0,
-                columnFill: "auto" as const,
-              }}
-              dangerouslySetInnerHTML={{ __html: html }}
-            />
-          </div>
-        ) : (
-          <div
-            ref={innerRef}
-            className="epub-content max-w-3xl mx-auto"
-            dangerouslySetInnerHTML={{ __html: html }}
-          />
-        )}
+        {memoizedContent}
       </div>
     </div>
   );
