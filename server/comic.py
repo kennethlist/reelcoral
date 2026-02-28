@@ -1,11 +1,24 @@
 import os
 import re
+import hashlib
 import zipfile
 from flask import Blueprint, request, jsonify, send_file
 from flask import current_app
 from io import BytesIO
 
 comic_bp = Blueprint("comic", __name__)
+
+CACHE_DIR = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
+COMIC_PAGE_CACHE_SUBDIR = "comic_pages"
+
+
+def _comic_cache_path(abs_path, page):
+    """Build a nested cache path for an extracted comic page, including file mtime for invalidation."""
+    mtime = os.path.getmtime(abs_path)
+    key = f"{abs_path}|{page}|{mtime}"
+    h = hashlib.sha256(key.encode()).hexdigest()
+    cache_dir = os.path.join(CACHE_DIR, COMIC_PAGE_CACHE_SUBDIR, h[:2], h[2:4])
+    return os.path.join(cache_dir, f"{h}")
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
@@ -84,13 +97,23 @@ def comic_page():
         return jsonify({"error": "page out of range"}), 400
 
     page_name = pages[page]
-    data = _read_comic_page(abs_path, page_name)
-    if data is None:
-        return jsonify({"error": "failed to read page"}), 500
-
     ext = os.path.splitext(page_name)[1].lower()
     mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                 ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp"}
     mime = mime_map.get(ext, "image/jpeg")
+
+    # Check disk cache first
+    cached = _comic_cache_path(abs_path, page) + ext
+    if os.path.exists(cached):
+        return send_file(cached, mimetype=mime)
+
+    data = _read_comic_page(abs_path, page_name)
+    if data is None:
+        return jsonify({"error": "failed to read page"}), 500
+
+    # Write to disk cache
+    os.makedirs(os.path.dirname(cached), exist_ok=True)
+    with open(cached, "wb") as f:
+        f.write(data)
 
     return send_file(BytesIO(data), mimetype=mime)

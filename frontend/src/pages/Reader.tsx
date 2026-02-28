@@ -408,16 +408,14 @@ function EpubReader({
     ...(isPageFlip ? { maxWidth: "56rem", margin: "0 auto", width: "100%" } : {}),
   }), [bgStyle, settings.epubMargin, settings.epubFontSize, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, isPageFlip]);
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center text-gray-400 gap-2">
-        <div>{loadProgress}</div>
-      </div>
-    );
-  }
-
   return (
     <div className="flex-1 flex flex-col overflow-hidden relative">
+      {/* Loading overlay — visible during both chapter fetching and layout computation */}
+      {!contentReady && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center text-gray-400">
+          <div>{loading ? loadProgress : "Rendering..."}</div>
+        </div>
+      )}
       {/* Content */}
       <div
         ref={contentRef}
@@ -529,15 +527,18 @@ function ImagePageReader({
     return comicPageUrl(path, currentPage);
   }, [path, currentPage, format, settings.pdfFit, containerSize]);
 
-  // Preload next page
+  // Preload nearby pages (prev 1, next 2)
   useEffect(() => {
-    if (currentPage < pageCount - 1) {
-      const img = new Image();
-      if (format === "pdf") {
-        const dpr = window.devicePixelRatio || 1;
-        img.src = pdfPageUrl(path, currentPage + 1, settings.pdfFit, Math.round(containerSize.width * dpr), Math.round(containerSize.height * dpr));
-      } else {
-        img.src = comicPageUrl(path, currentPage + 1);
+    const pagesToPreload = [currentPage - 1, currentPage + 1, currentPage + 2];
+    for (const p of pagesToPreload) {
+      if (p >= 0 && p < pageCount) {
+        const img = new Image();
+        if (format === "pdf") {
+          const dpr = window.devicePixelRatio || 1;
+          img.src = pdfPageUrl(path, p, settings.pdfFit, Math.round(containerSize.width * dpr), Math.round(containerSize.height * dpr));
+        } else {
+          img.src = comicPageUrl(path, p);
+        }
       }
     }
   }, [currentPage, pageCount, path, format, settings.pdfFit, containerSize]);
@@ -1110,7 +1111,7 @@ export default function Reader() {
       {/* Top bar overlay */}
       <div
         data-controls
-        className={`absolute top-0 left-0 right-0 z-20 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+0.5rem))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        className={`absolute top-0 left-0 right-0 z-20 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+1rem))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         style={{ paddingBottom: "3rem" }}
       >
         <div className="flex items-center gap-4">

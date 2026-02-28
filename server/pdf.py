@@ -1,9 +1,22 @@
 import os
+import hashlib
 from flask import Blueprint, request, jsonify, send_file
 from flask import current_app
 from io import BytesIO
 
 pdf_bp = Blueprint("pdf", __name__)
+
+CACHE_DIR = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
+PDF_PAGE_CACHE_SUBDIR = "pdf_pages"
+
+
+def _pdf_cache_path(abs_path, page, fit, width, height):
+    """Build a nested cache path for a rendered PDF page, including file mtime for invalidation."""
+    mtime = os.path.getmtime(abs_path)
+    key = f"{abs_path}|{page}|{fit}|{width}|{height}|{mtime}"
+    h = hashlib.sha256(key.encode()).hexdigest()
+    cache_dir = os.path.join(CACHE_DIR, PDF_PAGE_CACHE_SUBDIR, h[:2], h[2:4])
+    return os.path.join(cache_dir, f"{h}.png")
 
 
 def _resolve_path(root, rel_path):
@@ -48,6 +61,11 @@ def pdf_page():
     if not abs_path or not os.path.isfile(abs_path):
         return jsonify({"error": "not found"}), 404
 
+    # Check disk cache first
+    cached = _pdf_cache_path(abs_path, page, fit, width, height)
+    if os.path.exists(cached):
+        return send_file(cached, mimetype="image/png")
+
     import pymupdf
     doc = pymupdf.open(abs_path)
     if page < 0 or page >= doc.page_count:
@@ -76,5 +94,10 @@ def pdf_page():
     pix = pg.get_pixmap(matrix=mat)
     img_data = pix.tobytes("png")
     doc.close()
+
+    # Write to disk cache
+    os.makedirs(os.path.dirname(cached), exist_ok=True)
+    with open(cached, "wb") as f:
+        f.write(img_data)
 
     return send_file(BytesIO(img_data), mimetype="image/png")

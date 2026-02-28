@@ -211,7 +211,7 @@ export default function Gallery() {
       {/* Top bar */}
       <div
         data-controls
-        className={`absolute top-0 left-0 right-0 z-10 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+0.5rem))] bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        className={`absolute top-0 left-0 right-0 z-10 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+1rem))] bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
         <div className="flex items-center gap-4">
           <button
