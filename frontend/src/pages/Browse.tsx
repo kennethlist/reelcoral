@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, logout, getConfig, AppConfig, BrowseResult, BrowseEntry, downloadUrl } from "../api";
+import { browse, logout, getConfig, fetchThumbnailBatch, AppConfig, BrowseResult, BrowseEntry, downloadUrl } from "../api";
 import VideoCard from "../components/VideoCard";
 import Breadcrumbs from "../components/Breadcrumbs";
 import SearchBar from "../components/SearchBar";
@@ -230,6 +230,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const [error, setError] = useState("");
   const [editingThumbnail, setEditingThumbnail] = useState<string | null>(null);
   const [thumbVersion, setThumbVersion] = useState(0);
+  const [thumbDataMap, setThumbDataMap] = useState<Record<string, string>>({});
 
   // Compute parent path for back button
   const parentPath = useMemo(() => {
@@ -252,6 +253,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     setError("");
+    setThumbDataMap({});
     browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
       .then((result) => {
         setData(result);
@@ -259,6 +261,19 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         const savedY = popScrollPos(currentPath);
         if (savedY !== null) {
           requestAnimationFrame(() => window.scrollTo({ top: savedY, behavior: "instant" }));
+        }
+        // Batch-fetch thumbnails for entries that use the standard /api/thumbnail endpoint
+        const thumbPaths = result.entries
+          .filter((e) => !e.is_image && !e.is_audio && !e.is_ebook && !e.is_comic && !e.is_markdown && !e.name.toLowerCase().endsWith(".pdf"))
+          .map((e) => e.path);
+        if (thumbPaths.length > 0 && !result.is_music_context) {
+          fetchThumbnailBatch(thumbPaths).then((map) => {
+            const filtered: Record<string, string> = {};
+            for (const [k, v] of Object.entries(map)) {
+              if (v) filtered[k] = v;
+            }
+            setThumbDataMap(filtered);
+          }).catch(() => {});
         }
       })
       .catch(() => setError("Failed to load directory"));
@@ -643,6 +658,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
                     onEditThumbnail={() => setEditingThumbnail(entry.path)}
                     thumbVersion={thumbVersion}
                     generateOnFly={generateOnFly}
+                    thumbData={thumbDataMap[entry.path]}
                   />
                 </div>
               ))}

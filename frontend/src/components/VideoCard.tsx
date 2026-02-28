@@ -11,6 +11,7 @@ interface Props {
   musicMode?: boolean;
   coverArt?: string;
   isPlaying?: boolean;
+  thumbData?: string;
 }
 
 function formatSize(bytes?: number): string {
@@ -59,7 +60,7 @@ function NowPlayingIndicator() {
   );
 }
 
-export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, thumbVersion, generateOnFly = true, musicMode, coverArt, isPlaying }: Props) {
+export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, thumbVersion, generateOnFly = true, musicMode, coverArt, isPlaying, thumbData }: Props) {
   const [thumbFailed, setThumbFailed] = useState(false);
 
   const genParam = generateOnFly ? "" : "&generate=0";
@@ -81,6 +82,8 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
     thumbUrl = `/api/comic/page?path=${encodeURIComponent(entry.path)}&page=0`;
   } else if (entry.is_markdown) {
     thumbUrl = null; // No server-side thumbnail for markdown
+  } else if (thumbData) {
+    thumbUrl = `data:image/jpeg;base64,${thumbData}`;
   } else {
     thumbUrl = `/api/thumbnail?path=${encodeURIComponent(entry.path)}${thumbVersion ? `&v=${thumbVersion}` : ""}${genParam}`;
   }

@@ -199,6 +199,83 @@ def _generate_comic_thumbnail(comic_path, cache_path):
             os.remove(tmp_path)
 
 
+@thumbnail_bp.route("/thumbnails/batch", methods=["POST"])
+def thumbnails_batch():
+    config = current_app.config["MEDIA"]
+    root = config["media"]["root"]
+    real_root = os.path.realpath(root)
+
+    body = request.get_json(silent=True) or {}
+    paths = body.get("paths", [])
+    if not isinstance(paths, list) or len(paths) > 200:
+        return jsonify({"error": "invalid paths"}), 400
+
+    # Load overrides once
+    overrides = {}
+    overrides_file = os.path.join(os.path.dirname(CACHE_DIR), "thumbnail_overrides.json")
+    if os.path.exists(overrides_file):
+        with open(overrides_file) as f:
+            overrides = json.load(f)
+
+    import base64
+    thumbnails = {}
+    for path in paths:
+        if not isinstance(path, str):
+            continue
+
+        filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))
+        if not filepath.startswith(real_root):
+            thumbnails[path] = None
+            continue
+
+        # Check override
+        override_hash = overrides.get(path)
+        if override_hash:
+            override_cache = cache_path_for(override_hash)
+            if os.path.exists(override_cache):
+                try:
+                    with open(override_cache, "rb") as f:
+                        thumbnails[path] = base64.b64encode(f.read()).decode("ascii")
+                    continue
+                except OSError:
+                    pass
+
+        # Resolve actual media file for directories
+        target = filepath
+        if os.path.isdir(filepath):
+            extensions = set(config["media"].get("extensions", []))
+            media_file, _ = _find_first_media(filepath, extensions)
+            if not media_file:
+                media_file = next(_find_books(filepath), None)
+            if not media_file:
+                thumbnails[path] = None
+                continue
+            target = media_file
+        elif not os.path.isfile(filepath):
+            thumbnails[path] = None
+            continue
+
+        path_hash = hashlib.sha256(target.encode()).hexdigest()
+        cache_path = cache_path_for(path_hash)
+        legacy_path = os.path.join(CACHE_DIR, f"{path_hash}.jpg")
+
+        # Migrate legacy
+        if not os.path.exists(cache_path) and os.path.exists(legacy_path):
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            os.rename(legacy_path, cache_path)
+
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "rb") as f:
+                    thumbnails[path] = base64.b64encode(f.read()).decode("ascii")
+            except OSError:
+                thumbnails[path] = None
+        else:
+            thumbnails[path] = None
+
+    return jsonify({"thumbnails": thumbnails})
+
+
 @thumbnail_bp.route("/thumbnail")
 def thumbnail():
     config = current_app.config["MEDIA"]

@@ -281,6 +281,18 @@ export async function getMarkdownContent(path: string): Promise<{ html: string }
   return res.json();
 }
 
+// Batch thumbnails API
+export async function fetchThumbnailBatch(paths: string[]): Promise<Record<string, string | null>> {
+  const res = await fetch("/api/thumbnails/batch", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  });
+  if (!res.ok) return {};
+  const data = await res.json();
+  return data.thumbnails ?? {};
+}
+
 // Download API
 export function downloadUrl(path: string): string {
   return `/api/download?path=${encodeURIComponent(path)}`;
