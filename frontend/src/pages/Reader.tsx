@@ -140,6 +140,9 @@ function EpubReader({
   // Hide content until position is restored (prevents flash of wrong position)
   const [contentReady, setContentReady] = useState(false);
 
+  // Defer column CSS so the loading overlay can paint before expensive layout begins.
+  const [columnsReady, setColumnsReady] = useState(false);
+
   // Load chapters progressively: show chapter 0 immediately, continue in background
   useEffect(() => {
     let cancelled = false;
@@ -252,10 +255,26 @@ function EpubReader({
   // Recount pages after contentWidth/contentHeight changes or content changes.
   // Use rAF so the browser has applied the column CSS before we measure.
   useEffect(() => {
-    if (loading || settings.navMode !== "page" || contentWidth <= 0) return;
+    if (loading || settings.navMode !== "page" || contentWidth <= 0 || !columnsReady) return;
     const id = requestAnimationFrame(() => countPages());
     return () => cancelAnimationFrame(id);
-  }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, countPages]);
+  }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, columnsReady, countPages]);
+
+  // Defer column CSS so the loading overlay can paint before expensive layout begins.
+  // Double-rAF ensures at least one frame is painted before we trigger column layout.
+  useEffect(() => {
+    if (loading || settings.navMode !== "page" || contentWidth <= 0) {
+      setColumnsReady(false);
+      return;
+    }
+    let cancelled = false;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!cancelled) setColumnsReady(true);
+      });
+    });
+    return () => { cancelled = true; };
+  }, [loading, settings.navMode, contentWidth]);
 
   // Window resize listener — recalculate page dimensions on any resize (debounced)
   useEffect(() => {
@@ -379,9 +398,7 @@ function EpubReader({
             className="epub-content"
             style={{
               height: "100%",
-              columnWidth: `${contentWidth || 9999}px`,
-              columnGap: 0,
-              columnFill: "auto" as const,
+              ...(columnsReady ? { columnWidth: `${contentWidth}px`, columnGap: 0, columnFill: "auto" as const } : {}),
             }}
             dangerouslySetInnerHTML={{ __html: html }}
           />
@@ -395,7 +412,7 @@ function EpubReader({
         dangerouslySetInnerHTML={{ __html: html }}
       />
     );
-  }, [html, isPageFlip, contentWidth, contentHeight]);
+  }, [html, isPageFlip, contentWidth, contentHeight, columnsReady]);
 
   const containerStyle = useMemo(() => ({
     backgroundColor: bgStyle.bg,
@@ -1156,7 +1173,7 @@ export default function Reader() {
       </div>
 
       {/* Content area */}
-      <div className="flex-1 flex flex-col pt-0 overflow-hidden">
+      <div className="flex-1 flex flex-col pt-[env(safe-area-inset-top)] overflow-hidden">
         {format === "epub" && (
           <EpubReader
             path={currentPath}

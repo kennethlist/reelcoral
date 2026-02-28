@@ -49,7 +49,8 @@ def browse():
 
     rel_path = request.args.get("path", "/").lstrip("/")
     page = max(1, int(request.args.get("page", 1)))
-    limit = min(200, max(1, int(request.args.get("limit", 50))))
+    raw_limit = int(request.args.get("limit", 50))
+    limit = 0 if raw_limit == 0 else min(200, max(1, raw_limit))
     search = request.args.get("search", "").lower().strip()
     letter = request.args.get("letter", "").strip()
     sort = request.args.get("sort", "alpha").strip().lower()
@@ -167,8 +168,11 @@ def browse():
             entries = [e for e in entries if e["name"] and e["name"][0].upper() == letter.upper()]
 
     total = len(entries)
-    start = (page - 1) * limit
-    page_entries = entries[start : start + limit]
+    if limit == 0:
+        page_entries = entries
+    else:
+        start = (page - 1) * limit
+        page_entries = entries[start : start + limit]
 
     # Build breadcrumbs
     parts = [p for p in rel_path.split("/") if p]

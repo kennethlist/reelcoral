@@ -43,7 +43,7 @@ export default function Gallery() {
       }
     } catch {}
     setLoading(true);
-    browse(parentDir, 1, 200, search, letter, sort, sortDir)
+    browse(parentDir, 1, 0, search, letter, sort, sortDir)
       .then((data) => {
         const files = data.entries.filter((e) => !e.is_dir);
         setAllFiles(files);
@@ -236,7 +236,7 @@ export default function Gallery() {
 
       {/* Image area */}
       {currentImage && (
-        <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute inset-0 flex items-center justify-center" style={{ paddingTop: "env(safe-area-inset-top)" }}>
           <img
             src={`/api/image?path=${encodeURIComponent(currentImage.path)}`}
             alt={currentImage.name}
