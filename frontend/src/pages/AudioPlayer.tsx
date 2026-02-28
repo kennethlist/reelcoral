@@ -299,7 +299,7 @@ export default function AudioPlayer() {
       <audio ref={audioRef} preload="auto" style={{ display: "none" }} />
 
       {/* Top bar */}
-      <div className="flex items-center justify-between px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+      <div className="flex items-center justify-between px-4 py-3 pt-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))]">
         <button
           onClick={goBack}
           className="text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer"

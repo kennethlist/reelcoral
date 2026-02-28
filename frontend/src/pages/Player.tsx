@@ -715,7 +715,7 @@ export default function Player() {
         className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
         {/* Top gradient bar */}
-        <div className="bg-gradient-to-b from-black/70 to-transparent px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] flex items-center gap-3">
+        <div className="bg-gradient-to-b from-black/70 to-transparent px-4 py-3 pt-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))] flex items-center gap-3">
           <button
             onClick={goBack}
             className="text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer"

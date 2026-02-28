@@ -137,6 +137,9 @@ function EpubReader({
   // Track whether all chapters are loaded (for hiding pagination until ready)
   const [fullyLoaded, setFullyLoaded] = useState(false);
 
+  // Hide content until position is restored (prevents flash of wrong position)
+  const [contentReady, setContentReady] = useState(false);
+
   // Load chapters progressively: show chapter 0 immediately, continue in background
   useEffect(() => {
     let cancelled = false;
@@ -147,6 +150,7 @@ function EpubReader({
     progressRef.current = 0;
     positionRestoredRef.current = false;
     setFullyLoaded(false);
+    setContentReady(false);
     setLoading(true);
     setLoadProgress("Loading book info...");
 
@@ -180,9 +184,14 @@ function EpubReader({
           if (settings.navMode === "scroll" && saved?.scrollY) {
             requestAnimationFrame(() => {
               contentRef.current?.scrollTo({ top: saved.scrollY });
+              requestAnimationFrame(() => setContentReady(true));
             });
           } else if (settings.navMode === "page" && saved?.progress != null) {
             progressRef.current = saved.progress;
+            // contentReady will be set after countPages runs (see below)
+          } else {
+            // No position to restore — show immediately
+            setContentReady(true);
           }
           positionRestoredRef.current = true;
         } else if (i >= showAfterChapter && !cancelled) {
@@ -227,7 +236,11 @@ function EpubReader({
     // Restore position from progress fraction
     const newPage = Math.min(Math.round(progressRef.current * (pages - 1)), pages - 1);
     setCurrentPage(newPage);
-  }, [settings.navMode]);
+    // Reveal content after first countPages post-restore positions correctly
+    if (!contentReady && positionRestoredRef.current) {
+      setContentReady(true);
+    }
+  }, [settings.navMode, contentReady]);
 
   // Re-measure width when html, font settings, or navMode change
   useEffect(() => {
@@ -409,7 +422,7 @@ function EpubReader({
       <div
         ref={contentRef}
         className={`flex-1 ${isPageFlip ? "overflow-hidden" : "overflow-y-auto"}`}
-        style={containerStyle}
+        style={{ ...containerStyle, opacity: contentReady ? 1 : 0, transition: contentReady ? "opacity 0.15s ease-in" : "none" }}
         onScroll={handleScroll}
         onClick={(e) => {
           if ((e.target as HTMLElement).closest("a")) e.preventDefault();

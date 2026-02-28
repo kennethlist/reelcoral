@@ -408,7 +408,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className={`min-h-screen ${music.isVisible ? "pb-20" : ""}`}>
-      <header className="sticky top-0 bg-gray-950/90 backdrop-blur border-b border-gray-800 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] z-10">
+      <header className="sticky top-0 bg-gray-950/90 backdrop-blur border-b border-gray-800 px-4 py-3 pt-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))] z-10">
         <div className="w-full flex items-center justify-between gap-4">
           <div className="flex items-center gap-2 min-w-0">
             {data && (
