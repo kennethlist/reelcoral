@@ -464,22 +464,6 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
                 </svg>
               )}
             </button>
-            <select
-              value={prefs.page_size}
-              onChange={(e) => {
-                setPrefs({ page_size: Number(e.target.value) });
-                const params: Record<string, string> = { path: currentPath };
-                if (currentSearch) params.search = currentSearch;
-                if (activeLetter) params.letter = activeLetter;
-                addSortParams(params);
-                setSearchParams(params);
-              }}
-              className="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-sm text-gray-300 focus:outline-none focus:border-blue-500 cursor-pointer"
-            >
-              {[12, 24, 36, 48, 60].map((n) => (
-                <option key={n} value={n}>{n} / page</option>
-              ))}
-            </select>
           </div>
         </div>
 
@@ -674,7 +658,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
         {/* A-Z sidebar — fixed to right edge, fits between header and bottom */}
         {data && (data.entries.length > 0 || activeLetter) && (
-          <div className={`fixed right-1 top-[52px] ${music.isVisible ? "bottom-16" : "bottom-0"} z-20 flex flex-col items-center justify-evenly py-4`}>
+          <div className={`fixed right-1 top-[max(52px,calc(env(safe-area-inset-top)+44px))] ${music.isVisible ? "bottom-16" : "bottom-0"} z-20 flex flex-col items-center justify-evenly py-4`}>
             {"ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("").map((letter) => {
               const isAvailable = availableLetters.has(letter);
               return (

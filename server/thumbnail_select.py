@@ -367,11 +367,9 @@ def select():
         if not filepath:
             return jsonify({"error": "forbidden"}), 403
 
-        media_path, path_hash, _ = _resolve_media(filepath, config)
-        if not media_path:
-            return jsonify({"error": "no media found"}), 404
-
-        cache_path = cache_path_for(path_hash)
+        # Use browse path hash so overrides don't collide with child file caches
+        override_hash = hashlib.sha256(path.encode()).hexdigest()
+        cache_path = cache_path_for(override_hash)
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
         # Save upload to temp file, then resize with ffmpeg
@@ -403,22 +401,19 @@ def select():
         if not filepath:
             return jsonify({"error": "forbidden"}), 403
 
-        media_path, path_hash, _ = _resolve_media(filepath, config)
-        if not media_path:
-            return jsonify({"error": "no media found"}), 404
-
-        # Candidates are keyed by browse path hash, main cache by media file hash
-        browse_hash = hashlib.sha256(path.encode()).hexdigest()
+        # Use browse path hash so overrides don't collide with child file caches
+        override_hash = hashlib.sha256(path.encode()).hexdigest()
+        browse_hash = override_hash  # same hash used for candidate keys
         candidate_path = os.path.join(CACHE_DIR, f"{browse_hash}_candidate_{index}.jpg")
         if not os.path.exists(candidate_path):
             return jsonify({"error": "candidate not found"}), 404
 
-        cache_path = cache_path_for(path_hash)
+        cache_path = cache_path_for(override_hash)
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         shutil.copy2(candidate_path, cache_path)
 
     overrides = _load_overrides()
-    overrides[path] = path_hash
+    overrides[path] = override_hash
     _save_overrides(overrides)
 
     return jsonify({"ok": True})
@@ -430,22 +425,14 @@ def reset():
     if not path:
         return jsonify({"error": "path required"}), 400
 
-    filepath, config = _resolve_path(path)
-    if not filepath:
-        return jsonify({"error": "forbidden"}), 403
-
-    media_path, path_hash, _ = _resolve_media(filepath, config)
-    if not media_path:
-        return jsonify({"error": "no media found"}), 404
-
-    # Remove cached thumbnail so it regenerates on next request
-    cache_path = cache_path_for(path_hash)
-    if os.path.exists(cache_path):
-        os.remove(cache_path)
-
-    # Remove override entry
+    # Remove override entry and its cached file
     overrides = _load_overrides()
-    overrides.pop(path, None)
+    override_hash = overrides.pop(path, None)
     _save_overrides(overrides)
+
+    if override_hash:
+        cache_path = cache_path_for(override_hash)
+        if os.path.exists(cache_path):
+            os.remove(cache_path)
 
     return jsonify({"ok": True})

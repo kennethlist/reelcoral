@@ -1,4 +1,5 @@
 import os
+import json
 import hashlib
 import subprocess
 import warnings
@@ -208,6 +209,17 @@ def thumbnail():
     filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))
     if not filepath.startswith(os.path.realpath(root)):
         return jsonify({"error": "forbidden"}), 403
+
+    # Check for a thumbnail override (keyed by browse path, not media file)
+    overrides_file = os.path.join(os.path.dirname(CACHE_DIR), "thumbnail_overrides.json")
+    if os.path.exists(overrides_file):
+        with open(overrides_file) as f:
+            overrides = json.load(f)
+        override_hash = overrides.get(path)
+        if override_hash:
+            override_cache = cache_path_for(override_hash)
+            if os.path.exists(override_cache):
+                return send_file(override_cache, mimetype="image/jpeg")
 
     # For directories, find the first video or image file recursively
     is_image = False
