@@ -1263,7 +1263,9 @@ export default function Reader() {
 
       {/* EPUB global styles */}
       <style>{`
-        .epub-content img { max-width: 100%; height: auto; max-height: var(--epub-page-height, none); object-fit: contain; break-inside: avoid; display: block; margin-left: auto; margin-right: auto; }
+        .epub-content img { max-width: 100%; height: auto; max-height: var(--epub-page-height, 80vh); object-fit: contain; break-inside: avoid; display: block; margin-left: auto; margin-right: auto; }
+        .epub-content figure, .epub-content picture { max-width: 100%; break-inside: avoid; }
+        .epub-content svg { max-width: 100%; max-height: var(--epub-page-height, 80vh); break-inside: avoid; }
         .epub-content h1, .epub-content h2, .epub-content h3 { margin: 1em 0 0.5em; }
         .epub-content p { margin: 0.5em 0; }
         .epub-content a { color: inherit; text-decoration: none; }
