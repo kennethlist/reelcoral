@@ -219,7 +219,7 @@ def thumbnail():
         if override_hash:
             override_cache = cache_path_for(override_hash)
             if os.path.exists(override_cache):
-                return send_file(override_cache, mimetype="image/jpeg")
+                return send_file(override_cache, mimetype="image/jpeg", max_age=86400)
 
     # For directories, find the first video or image file recursively
     is_image = False
@@ -256,7 +256,7 @@ def thumbnail():
         os.rename(legacy_path, cache_path)
 
     if os.path.exists(cache_path):
-        return send_file(cache_path, mimetype="image/jpeg")
+        return send_file(cache_path, mimetype="image/jpeg", max_age=86400)
 
     # If on-the-fly generation is disabled, return 404 for uncached thumbnails
     generate_on_fly = config.get("thumbnails", {}).get("generate_on_fly", True)
@@ -280,7 +280,7 @@ def thumbnail():
                     break
         if not ok:
             return jsonify({"error": "thumbnail generation failed"}), 500
-        return send_file(cache_path, mimetype="image/jpeg")
+        return send_file(cache_path, mimetype="image/jpeg", max_age=86400)
 
     if is_image:
         # Resize image to thumbnail using FFmpeg
@@ -306,4 +306,4 @@ def thumbnail():
     if result.returncode != 0 or not os.path.exists(cache_path):
         return jsonify({"error": "thumbnail generation failed"}), 500
 
-    return send_file(cache_path, mimetype="image/jpeg")
+    return send_file(cache_path, mimetype="image/jpeg", max_age=86400)

@@ -98,7 +98,6 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
           <img
             src={thumbUrl}
             alt=""
-            loading="lazy"
             className="absolute inset-0 w-full h-full object-cover"
             onError={() => setThumbFailed(true)}
           />
