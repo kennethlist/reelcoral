@@ -347,6 +347,8 @@ function EpubReader({
                 columnGap: 0,
                 columnFill: "auto" as const,
                 transform: contentWidth > 0 ? `translateX(-${currentPage * contentWidth}px)` : undefined,
+                willChange: "transform",
+                contain: "layout style paint",
               }}
               dangerouslySetInnerHTML={{ __html: html }}
             />
@@ -1148,6 +1150,28 @@ export default function Reader() {
           />
         )}
       </div>
+
+      {/* Invisible tap zones for page-flip navigation and overlay toggle */}
+      {settings.navMode === "page" && format !== "md" && !settingsOpen && !pageInputFocused && (
+        <div className="absolute inset-0 z-10 flex">
+          <div
+            className="w-1/3 h-full"
+            onClick={() => (window as any).__readerNav?.(-1)}
+          />
+          <div
+            className="w-1/3 h-full"
+            onClick={() => {
+              if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+              suppressShowUntilRef.current = Date.now() + 300;
+              setControlsVisible((v) => !v);
+            }}
+          />
+          <div
+            className="w-1/3 h-full"
+            onClick={() => (window as any).__readerNav?.(1)}
+          />
+        </div>
+      )}
 
       {/* Bottom bar overlay — page-flip mode only, not for markdown */}
       {settings.navMode === "page" && format !== "md" && (
