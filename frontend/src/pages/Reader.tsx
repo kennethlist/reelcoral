@@ -1167,14 +1167,45 @@ export default function Reader() {
           <div className="flex flex-col gap-2 max-w-lg mx-auto">
             {/* Slider */}
             {pageInfo.total > 1 && (format !== "epub" || settings.showEpubPages) && (
-              <input
-                type="range"
-                min={1}
-                max={pageInfo.total}
-                value={pageInfo.current}
-                onChange={(e) => (window as any).__readerGoToPage?.(Number(e.target.value) - 1)}
-                className="w-full h-1.5 rounded-full appearance-none bg-white/20 cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-lg [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:shadow-lg"
-              />
+              <div
+                className="relative w-full h-8 flex items-center cursor-pointer touch-none"
+                onPointerDown={(e) => {
+                  const track = e.currentTarget;
+                  track.setPointerCapture(e.pointerId);
+                  const update = (cx: number) => {
+                    const rect = track.getBoundingClientRect();
+                    const ratio = Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
+                    const page = Math.round(ratio * (pageInfo.total - 1)) + 1;
+                    if (page !== pageInfo.current) {
+                      (window as any).__readerGoToPage?.(page - 1);
+                    }
+                  };
+                  update(e.clientX);
+                  const onMove = (ev: PointerEvent) => {
+                    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+                    update(ev.clientX);
+                  };
+                  const onUp = () => {
+                    track.removeEventListener("pointermove", onMove);
+                    track.removeEventListener("pointerup", onUp);
+                    track.removeEventListener("pointercancel", onUp);
+                  };
+                  track.addEventListener("pointermove", onMove);
+                  track.addEventListener("pointerup", onUp);
+                  track.addEventListener("pointercancel", onUp);
+                }}
+              >
+                <div className="absolute left-0 right-0 h-1.5 rounded-full bg-white/20">
+                  <div
+                    className="h-full rounded-full bg-white/50"
+                    style={{ width: `${((pageInfo.current - 1) / Math.max(1, pageInfo.total - 1)) * 100}%` }}
+                  />
+                </div>
+                <div
+                  className="absolute w-5 h-5 rounded-full bg-white shadow-lg -translate-x-1/2 pointer-events-none"
+                  style={{ left: `${((pageInfo.current - 1) / Math.max(1, pageInfo.total - 1)) * 100}%` }}
+                />
+              </div>
             )}
             {/* Prev / page input / Next */}
             <div className="flex items-center justify-between">

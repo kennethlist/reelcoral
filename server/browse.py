@@ -140,16 +140,14 @@ def browse():
     # Sort: directories first, then files sorted by chosen mode and direction
     reverse = sort_dir == "desc"
     if sort == "newest":
-        entries.sort(key=lambda e: (not e["is_dir"], e.get("mtime", 0)), reverse=False)
-        # Directories first (not reversed), then files by mtime
         dirs = [e for e in entries if e["is_dir"]]
         files = [e for e in entries if not e["is_dir"]]
-        files.sort(key=lambda e: e.get("mtime", 0), reverse=not reverse)
+        files.sort(key=lambda e: e.get("mtime", 0), reverse=reverse)
         entries = dirs + files
     elif sort == "largest":
         dirs = [e for e in entries if e["is_dir"]]
         files = [e for e in entries if not e["is_dir"]]
-        files.sort(key=lambda e: e.get("size", 0), reverse=not reverse)
+        files.sort(key=lambda e: e.get("size", 0), reverse=reverse)
         entries = dirs + files
     else:
         dirs = [e for e in entries if e["is_dir"]]
