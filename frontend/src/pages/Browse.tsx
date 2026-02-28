@@ -482,6 +482,10 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
 
+        {!data && !error && (
+          <div className="flex items-center justify-center py-16 text-gray-400">Loading...</div>
+        )}
+
         {error && (
           <div className="text-red-400 text-center py-8">{error}</div>
         )}

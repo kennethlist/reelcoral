@@ -151,13 +151,18 @@ function EpubReader({
       setInfo(data);
 
       const saved = getPosition(path);
-      const parts: string[] = [];
-      for (let i = 0; i < data.chapter_count; i++) {
+      const count = data.chapter_count;
+      const parts: string[] = new Array(count);
+      const BATCH = 5;
+      for (let start = 0; start < count; start += BATCH) {
         if (cancelled) return;
-        setLoadProgress(`Loading chapter ${i + 1} / ${data.chapter_count}...`);
-        const ch = await getEbookChapter(path, i);
+        const end = Math.min(start + BATCH, count);
+        setLoadProgress(`Loading chapters ${start + 1}–${end} / ${count}...`);
+        const batch = await Promise.all(
+          Array.from({ length: end - start }, (_, j) => getEbookChapter(path, start + j))
+        );
         if (cancelled) return;
-        parts.push(ch.html);
+        for (let j = 0; j < batch.length; j++) parts[start + j] = batch[j].html;
       }
 
       const fullHtml = parts.join('<hr class="epub-chapter-break" />');
@@ -240,19 +245,31 @@ function EpubReader({
     return () => imgs.forEach((img) => img.removeEventListener("load", onLoad));
   }, [html, settings.navMode, countPages]);
 
-  // Update page info for parent (top bar / bottom bar)
+  // Apply page transform directly on the DOM element (avoids React re-rendering the
+  // massive dangerouslySetInnerHTML content on every page flip).
   useEffect(() => {
-    if (!info) return;
-    if (settings.navMode === "page") {
-      onPageInfo(currentPage + 1, totalPages);
-      // Only save after position restored to avoid overwriting saved data
-      if (positionRestoredRef.current) {
+    if (settings.navMode !== "page" || !innerRef.current || contentWidth <= 0) return;
+    innerRef.current.style.transform = `translate3d(-${currentPage * contentWidth}px, 0, 0)`;
+  }, [currentPage, contentWidth, settings.navMode]);
+
+  // Update page info for parent and save position (debounced to avoid
+  // re-rendering the entire component tree on every rapid page flip).
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!info || settings.navMode !== "page") return;
+    onPageInfo(currentPage + 1, totalPages);
+    // Update progress ref immediately (used for resize repositioning)
+    progressRef.current = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
+    // Debounce the localStorage write
+    if (positionRestoredRef.current) {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
         const progress = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
-        progressRef.current = progress;
         const chapter = info ? Math.max(0, Math.min(Math.floor(progress * info.chapter_count), info.chapter_count - 1)) : 0;
         savePosition(path, { page: currentPage, progress, chapter });
-      }
+      }, 300);
     }
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [currentPage, totalPages, settings.navMode, info]);
 
   // Save scroll position on scroll (scroll mode only)
@@ -346,9 +363,6 @@ function EpubReader({
                 columnWidth: `${contentWidth || 9999}px`,
                 columnGap: 0,
                 columnFill: "auto" as const,
-                transform: contentWidth > 0 ? `translateX(-${currentPage * contentWidth}px)` : undefined,
-                willChange: "transform",
-                contain: "layout style paint",
               }}
               dangerouslySetInnerHTML={{ __html: html }}
             />
@@ -947,76 +961,8 @@ export default function Reader() {
     }
   }, [pageInputFocused]);
 
-  // Mobile tap zones — use touch events directly since onClick often doesn't
-  // fire when nested scrollable/overflow elements consume the touch gesture.
-  const touchStartRef = useRef<{ x: number; y: number; t: number } | null>(null);
-
-  const handleTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    if (!isTouch) return;
-    const touch = e.touches[0];
-    touchStartRef.current = { x: touch.clientX, y: touch.clientY, t: Date.now() };
-  }, [isTouch]);
-
-  const handleTouchEnd = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
-    if (!isTouch || !touchStartRef.current) return;
-    const touch = e.changedTouches[0];
-    const dx = Math.abs(touch.clientX - touchStartRef.current.x);
-    const dy = Math.abs(touch.clientY - touchStartRef.current.y);
-    const dt = Date.now() - touchStartRef.current.t;
-    touchStartRef.current = null;
-
-    // Only treat as a tap if finger didn't move much and was quick
-    if (dx > 15 || dy > 15 || dt > 400) return;
-
-    if ((e.target as HTMLElement).closest("[data-controls]")) return;
-    if ((e.target as HTMLElement).closest(".epub-content a")) return;
-
-    // If controls are visible, any tap outside controls dismisses immediately
-    if (controlsVisible) {
-      setControlsVisible(false);
-      return;
-    }
-
-    const rect = containerRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const x = touch.clientX - rect.left;
-    const third = rect.width / 3;
-
-    if (x < third) {
-      // Left third: prev page within book
-      (window as any).__readerNav?.(-1);
-    } else if (x > third * 2) {
-      // Right third: next page within book
-      (window as any).__readerNav?.(1);
-    } else {
-      // Center: show overlay
-      setControlsVisible(true);
-    }
-  }, [isTouch, controlsVisible]);
-
-  // Desktop click — center click toggles overlay
-  const handleClick = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      if (isTouch) return;
-      if ((e.target as HTMLElement).closest("[data-controls]")) return;
-      if ((e.target as HTMLElement).closest(".epub-content a")) return;
-      if ((e.target as HTMLElement).closest("button")) return;
-      if ((e.target as HTMLElement).closest("a")) return;
-
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = e.clientX - rect.left;
-      const third = rect.width / 3;
-
-      if (x >= third && x <= third * 2) {
-        // Suppress showControls from mousemove for 300ms to prevent flicker
-        if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-        suppressShowUntilRef.current = Date.now() + 300;
-        setControlsVisible((v) => !v);
-      }
-    },
-    [isTouch]
-  );
+  // Note: tap zones (transparent overlay divs) handle all tap/click navigation
+  // and overlay toggling — see the JSX below. No manual touch/click handlers needed.
 
   // Keyboard
   useEffect(() => {
@@ -1073,9 +1019,6 @@ export default function Reader() {
       style={{ touchAction: "manipulation" }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
-      onClick={handleClick}
     >
       {/* Top bar overlay */}
       <div
@@ -1151,26 +1094,42 @@ export default function Reader() {
         )}
       </div>
 
-      {/* Invisible tap zones for page-flip navigation and overlay toggle */}
-      {settings.navMode === "page" && format !== "md" && !settingsOpen && !pageInputFocused && (
-        <div className="absolute inset-0 z-10 flex">
-          <div
-            className="w-1/3 h-full"
-            onClick={() => (window as any).__readerNav?.(-1)}
-          />
-          <div
-            className="w-1/3 h-full"
-            onClick={() => {
-              if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-              suppressShowUntilRef.current = Date.now() + 300;
-              setControlsVisible((v) => !v);
-            }}
-          />
-          <div
-            className="w-1/3 h-full"
-            onClick={() => (window as any).__readerNav?.(1)}
-          />
-        </div>
+      {/* Invisible tap zones for navigation and overlay toggle */}
+      {!settingsOpen && !pageInputFocused && (
+        settings.navMode === "page" ? (
+          <div className="absolute inset-0 z-10 flex">
+            <div
+              className="w-1/3 h-full"
+              onClick={() => (window as any).__readerNav?.(-1)}
+            />
+            <div
+              className="w-1/3 h-full"
+              onClick={() => {
+                if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+                suppressShowUntilRef.current = Date.now() + 300;
+                setControlsVisible((v) => !v);
+              }}
+            />
+            <div
+              className="w-1/3 h-full"
+              onClick={() => (window as any).__readerNav?.(1)}
+            />
+          </div>
+        ) : (
+          /* Scroll mode: only a center overlay toggle that doesn't block scrolling */
+          <div className="absolute inset-0 z-10 flex pointer-events-none">
+            <div className="w-1/3 h-full" />
+            <div
+              className="w-1/3 h-full pointer-events-auto"
+              onClick={() => {
+                if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+                suppressShowUntilRef.current = Date.now() + 300;
+                setControlsVisible((v) => !v);
+              }}
+            />
+            <div className="w-1/3 h-full" />
+          </div>
+        )
       )}
 
       {/* Bottom bar overlay — page-flip mode only, not for markdown */}
