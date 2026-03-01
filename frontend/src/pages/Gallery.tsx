@@ -19,6 +19,7 @@ export default function Gallery() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTouch] = useState(() => isTouchDevice());
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hoveringControlsRef = useRef(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const currentIndexRef = useRef(currentIndex);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
@@ -107,9 +108,19 @@ export default function Gallery() {
     setControlsVisible(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      setControlsVisible(false);
+      if (!hoveringControlsRef.current) setControlsVisible(false);
     }, 500);
   }, []);
+
+  const handleControlsEnter = useCallback(() => {
+    hoveringControlsRef.current = true;
+    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+  }, []);
+
+  const handleControlsLeave = useCallback(() => {
+    hoveringControlsRef.current = false;
+    showControls();
+  }, [showControls]);
 
   // Show controls on mount
   useEffect(() => {
@@ -225,6 +236,8 @@ export default function Gallery() {
       {/* Top bar */}
       <div
         data-controls
+        onMouseEnter={handleControlsEnter}
+        onMouseLeave={handleControlsLeave}
         className={`absolute top-0 left-0 right-0 z-20 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+1rem))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         style={{ paddingBottom: "3rem" }}
       >
@@ -264,7 +277,10 @@ export default function Gallery() {
       {/* Left arrow */}
       {hasPrev && (
         <button
+          data-controls
           onClick={() => goTo(-1)}
+          onMouseEnter={handleControlsEnter}
+          onMouseLeave={handleControlsLeave}
           className={`absolute left-0 top-14 bottom-0 w-12 z-10 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
@@ -278,7 +294,10 @@ export default function Gallery() {
       {/* Right arrow */}
       {hasNext && (
         <button
+          data-controls
           onClick={() => goTo(1)}
+          onMouseEnter={handleControlsEnter}
+          onMouseLeave={handleControlsLeave}
           className={`absolute right-0 top-14 bottom-0 w-12 z-10 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
@@ -294,6 +313,8 @@ export default function Gallery() {
         <button
           data-controls
           onClick={toggleFullscreen}
+          onMouseEnter={handleControlsEnter}
+          onMouseLeave={handleControlsLeave}
           className={`absolute bottom-4 right-4 z-10 transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
