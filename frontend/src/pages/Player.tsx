@@ -161,6 +161,8 @@ export default function Player() {
   const goToSibling = useCallback((delta: number) => {
     const nextIdx = siblingIndex + delta;
     if (nextIdx < 0 || nextIdx >= siblings.length) return;
+    // Mark current file as viewed before navigating away
+    if (filePath) setFileStatus(filePath, "opened").catch(() => {});
     const entry = siblings[nextIdx];
     const ext = "." + entry.name.split(".").pop()?.toLowerCase();
     const readerExts = new Set([".epub", ".pdf", ".cbr", ".cbz", ".md"]);
@@ -174,7 +176,7 @@ export default function Player() {
       // Navigate to another video — update search params to trigger re-init
       setSearchParams({ path: entry.path }, { replace: true });
     }
-  }, [siblingIndex, siblings, navigate, setSearchParams]);
+  }, [filePath, siblingIndex, siblings, navigate, setSearchParams]);
 
   // Stream effect — only fires when actual stream params change
   useEffect(() => {

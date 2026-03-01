@@ -73,6 +73,8 @@ export default function Gallery() {
       // Navigate within all files (images + videos) in directory order
       const currentImage = images[currentIndex];
       if (!currentImage) return;
+      // Mark current file as viewed before navigating away
+      setFileStatus(currentImage.path, "opened").catch(() => {});
       const allIdx = allFiles.findIndex((e) => e.path === currentImage.path);
       if (allIdx < 0) return;
       const nextAllIdx = allIdx + delta;

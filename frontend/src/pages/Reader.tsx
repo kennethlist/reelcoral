@@ -1036,6 +1036,8 @@ export default function Reader() {
     (delta: number) => {
       const nextIdx = currentFileIndex + delta;
       if (nextIdx < 0 || nextIdx >= allFiles.length) return;
+      // Mark current file as viewed before navigating away
+      if (currentPath) setFileStatus(currentPath, "opened").catch(() => {});
       const next = allFiles[nextIdx];
       const ext = "." + next.name.split(".").pop()?.toLowerCase();
       if (READER_EXTS.has(ext)) {
@@ -1049,7 +1051,7 @@ export default function Reader() {
         nav(`/play?path=${encodeURIComponent(next.path)}`, { replace: true });
       }
     },
-    [currentFileIndex, allFiles, nav, setSearchParams]
+    [currentPath, currentFileIndex, allFiles, nav, setSearchParams]
   );
 
   // Controls visibility
@@ -1063,13 +1065,6 @@ export default function Reader() {
     }, 500);
   }, [settingsOpen, pageInputFocused]);
 
-  useEffect(() => {
-    if (isTouch) {
-      setControlsVisible(true);
-    } else {
-      showControls();
-    }
-  }, [showControls, isTouch]);
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if (isTouch) return;
@@ -1190,7 +1185,7 @@ export default function Reader() {
       {/* Top bar overlay */}
       <div
         data-controls
-        className={`absolute top-0 left-0 right-0 z-20 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+1rem))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        className={`absolute top-0 left-0 right-0 z-30 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+1rem))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         style={{ paddingBottom: "3rem" }}
       >
         <div className="flex items-center gap-4">

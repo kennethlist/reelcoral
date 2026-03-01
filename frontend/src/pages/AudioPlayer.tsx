@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { audioUrl, getConfig, browse, BrowseEntry } from "../api";
+import { audioUrl, getConfig, browse, BrowseEntry, setFileStatus } from "../api";
 import { useMusicPlayer } from "../hooks/useMusicPlayer";
 
 const PROFILE_KEY = "rc-music-profile";
@@ -101,6 +101,8 @@ export default function AudioPlayer() {
   const goToSibling = useCallback((delta: number) => {
     const nextIdx = siblingIndex + delta;
     if (nextIdx < 0 || nextIdx >= siblings.length) return;
+    // Mark current file as viewed before navigating away
+    if (filePath) setFileStatus(filePath, "opened").catch(() => {});
     const entry = siblings[nextIdx];
     const ext = "." + entry.name.split(".").pop()?.toLowerCase();
     const readerExts = new Set([".epub", ".pdf", ".cbr", ".cbz", ".md"]);
@@ -113,7 +115,7 @@ export default function AudioPlayer() {
     } else {
       navigate(`/play?path=${encodeURIComponent(entry.path)}`, { replace: true });
     }
-  }, [siblingIndex, siblings, navigate]);
+  }, [filePath, siblingIndex, siblings, navigate]);
 
   // Audio event listeners
   useEffect(() => {
