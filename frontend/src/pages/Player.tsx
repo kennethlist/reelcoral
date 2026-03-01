@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import Hls from "hls.js";
 import { getMediaInfo, startStream, stopStream, MediaInfo, browse, BrowseEntry, setFileStatus } from "../api";
 import TrackSelector from "../components/TrackSelector";
-import { usePreferences, SubtitleFontSize, Preferences } from "../hooks/usePreferences";
+import { usePreferences, SubtitleFontSize } from "../hooks/usePreferences";
 
 const subtitleSizeClass: Record<SubtitleFontSize, string> = {
   "small": "text-xl",
@@ -652,12 +652,13 @@ export default function Player() {
       setSeekTarget(currentPosition());
     }
     setSubIdx(idx);
-    const update: Partial<Preferences> = { subtitles_enabled: idx !== null };
     if (idx !== null) {
+      // Persist preference only when selecting a track — deselecting subs
+      // shouldn't wipe out subtitles_enabled, since the user may just be
+      // watching a file that lacks their preferred language.
       const track = info?.subtitle_tracks.find((t) => t.index === idx);
-      if (track) update.preferred_subtitle_lang = track.lang;
+      if (track) setPrefs({ subtitles_enabled: true, preferred_subtitle_lang: track.lang });
     }
-    setPrefs(update);
   }
 
   function handleSubModeChange(mode: "burn" | "external") {
