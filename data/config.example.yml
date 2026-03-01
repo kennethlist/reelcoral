@@ -1,0 +1,89 @@
+server:
+  port: 8080
+  secret: "change-me-to-a-random-string"
+
+media:
+  root: "/media"
+  extensions: [".mp4", ".mkv", ".avi", ".mov", ".webm", ".m4v", ".ts", ".wmv", ".flv", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus", ".epub", ".pdf", ".cbr", ".cbz", ".md"]
+  music_folders: ["/music"]
+
+transcoding:
+  hardware: "vaapi"           # "vaapi", "qsv", or "software"
+  vaapi_device: "/dev/dri/renderD128"
+  segment_duration: 1
+  max_sessions: 4
+  profiles:
+    - name: "4K"
+      width: 3840
+      height: 2160
+      video_bitrate: "40M"
+      audio_bitrate: "192k"
+    - name: "1440p"
+      width: 2560
+      height: 1440
+      video_bitrate: "20M"
+      audio_bitrate: "192k"
+    - name: "1080p"
+      width: 1920
+      height: 1080
+      video_bitrate: "6M"
+      audio_bitrate: "192k"
+    - name: "720p"
+      width: 1280
+      height: 720
+      video_bitrate: "3M"
+      audio_bitrate: "128k"
+    - name: "480p"
+      width: 854
+      height: 480
+      video_bitrate: "1.5M"
+      audio_bitrate: "128k"
+    - name: "360p"
+      width: 640
+      height: 360
+      video_bitrate: "800k"
+      audio_bitrate: "96k"
+    - name: "240p"
+      width: 426
+      height: 240
+      video_bitrate: "500k"
+      audio_bitrate: "64k"
+    - name: "original"
+
+music:
+  profiles:
+    - name: "Original"
+    - name: "320kbps"
+      bitrate: "320k"
+    - name: "256kbps"
+      bitrate: "256k"
+    - name: "192kbps"
+      bitrate: "192k"
+    - name: "128kbps"
+      bitrate: "128k"
+    - name: "96kbps"
+      bitrate: "96k"
+    - name: "64kbps"
+      bitrate: "64k"
+
+thumbnails:
+  generate_on_fly: true
+  threads: 24
+
+defaults:
+  quality: "original"
+  audio_lang: "eng"
+  subtitle_lang: "eng"
+  subtitles_enabled: true
+  subtitle_mode: "external"
+  thumbnail_candidates: 3    # 3, 6, or 9
+  grid_size: "small"         # "small" or "large"
+  page_size: 12              # 12, 24, 36, 48, or 60
+  book_font: "Ubuntu"
+  book_font_weight: 400      # 100-900
+  book_line_height: 1.7      # 1.0-3.0
+
+auth:
+  users:
+    - username: "admin"
+      password: "admin"
