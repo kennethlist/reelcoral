@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, BrowseEntry } from "../api";
+import { browse, BrowseEntry, setFileStatus } from "../api";
 
 function isTouchDevice() {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -61,6 +61,10 @@ export default function Gallery() {
     const img = images[currentIndex];
     if (img && img.path !== currentPath) {
       setSearchParams({ path: img.path }, { replace: true });
+    }
+    // Auto-complete when viewing the last image
+    if (currentIndex === images.length - 1 && images.length > 0) {
+      setFileStatus(images[currentIndex].path, "completed").catch(() => {});
     }
   }, [currentIndex, images]);
 

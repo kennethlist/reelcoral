@@ -36,9 +36,10 @@ COPY server/ ./server/
 COPY --from=frontend-build /build/dist ./frontend/dist
 
 # Create directories
-RUN mkdir -p /cache/thumbnails /config
+RUN mkdir -p /cache/thumbnails /data
 
-ENV MEDIA_CONFIG=/config/config.yml
+ENV MEDIA_CONFIG=/data/config.yml
+ENV MEDIA_DATA_DIR=/data
 ENV MEDIA_CACHE_DIR=/cache/thumbnails
 ENV MEDIA_STREAM_TMPDIR=/tmp/media_streams
 ENV PATH="/app/venv/bin:$PATH"

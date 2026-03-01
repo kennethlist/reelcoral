@@ -33,6 +33,7 @@ export interface BrowseEntry {
   cover_art?: string;
   size?: number;
   mtime?: number;
+  file_status?: "opened" | "completed";
 }
 
 export interface Breadcrumb {
@@ -296,5 +297,59 @@ export async function fetchThumbnailBatch(paths: string[]): Promise<Record<strin
 // Download API
 export function downloadUrl(path: string): string {
   return `/api/download?path=${encodeURIComponent(path)}`;
+}
+
+// User Data API
+export async function getUserPreferences(): Promise<Record<string, unknown>> {
+  const res = await fetch("/api/user/preferences");
+  if (!res.ok) return {};
+  return res.json();
+}
+
+export async function saveUserPreferences(prefs: Record<string, unknown>): Promise<void> {
+  await fetch("/api/user/preferences", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(prefs),
+  });
+}
+
+export async function getUserData(key: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`/api/user/data/${encodeURIComponent(key)}`);
+  if (!res.ok) return {};
+  return res.json();
+}
+
+export async function saveUserData(key: string, data: Record<string, unknown>): Promise<void> {
+  await fetch(`/api/user/data/${encodeURIComponent(key)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+}
+
+export async function setFileStatus(path: string, status: "opened" | "completed"): Promise<void> {
+  await fetch("/api/user/file-status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path, status }),
+  });
+}
+
+export async function clearFileStatus(path: string): Promise<void> {
+  await fetch("/api/user/file-status", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+}
+
+export async function migrateLocalStorage(data: Record<string, unknown>): Promise<void> {
+  const res = await fetch("/api/user/migrate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Migration failed");
 }
 

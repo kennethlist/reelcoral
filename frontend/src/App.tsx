@@ -6,9 +6,53 @@ import Player from "./pages/Player";
 import AudioPlayer from "./pages/AudioPlayer";
 import Gallery from "./pages/Gallery";
 import Reader from "./pages/Reader";
-import { checkAuth } from "./api";
+import { checkAuth, migrateLocalStorage } from "./api";
 import { MusicPlayerProvider } from "./hooks/useMusicPlayer";
 import MusicBar from "./components/MusicBar";
+
+function useMigration() {
+  useEffect(() => {
+    const MIGRATED_KEY = "rc-migrated-to-db";
+    if (localStorage.getItem(MIGRATED_KEY)) return;
+
+    const data: Record<string, unknown> = {};
+
+    // Gather preferences
+    try {
+      const prefs = localStorage.getItem("media_preferences");
+      if (prefs) data.preferences = JSON.parse(prefs);
+    } catch {}
+
+    // Gather music volume/profile
+    try {
+      const vol = localStorage.getItem("rc-music-volume");
+      if (vol !== null) data.music_volume = parseFloat(vol);
+      const profile = localStorage.getItem("rc-music-profile");
+      if (profile) data.music_profile = profile;
+    } catch {}
+
+    // Gather read positions
+    try {
+      const positions = localStorage.getItem("rc-read-position");
+      if (positions) data.read_positions = JSON.parse(positions);
+    } catch {}
+
+    // Gather reader settings
+    try {
+      const settings = localStorage.getItem("rc-reader-settings");
+      if (settings) data.reader_settings = JSON.parse(settings);
+    } catch {}
+
+    if (Object.keys(data).length === 0) {
+      localStorage.setItem(MIGRATED_KEY, "1");
+      return;
+    }
+
+    migrateLocalStorage(data)
+      .then(() => localStorage.setItem(MIGRATED_KEY, "1"))
+      .catch(() => {});
+  }, []);
+}
 
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
@@ -16,6 +60,9 @@ export default function App() {
   useEffect(() => {
     checkAuth().then(setAuthed);
   }, []);
+
+  // Run migration after auth check
+  useMigration();
 
   if (authed === null) {
     return (

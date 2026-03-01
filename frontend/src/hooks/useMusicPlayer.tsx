@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from "react";
-import { audioUrl, getConfig } from "../api";
+import { audioUrl, getConfig, saveUserPreferences } from "../api";
 
 export interface MusicTrack {
   name: string;
@@ -171,11 +171,13 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const setVolume = useCallback((vol: number) => {
     setVolumeState(vol);
     localStorage.setItem(VOLUME_KEY, String(vol));
+    saveUserPreferences({ music_volume: vol }).catch(() => {});
   }, []);
 
   const setAudioProfile = useCallback((profile: string) => {
     setAudioProfileState(profile);
     localStorage.setItem(PROFILE_KEY, profile);
+    saveUserPreferences({ music_profile: profile }).catch(() => {});
   }, []);
 
   const dismiss = useCallback(() => {

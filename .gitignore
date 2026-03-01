@@ -17,6 +17,7 @@ venv/
 
 # Config with secrets
 config.yml
+data/
 
 # Cache/thumbnails
 cache/

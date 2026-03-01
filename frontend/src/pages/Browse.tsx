@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, logout, getConfig, fetchThumbnailBatch, AppConfig, BrowseResult, BrowseEntry, downloadUrl } from "../api";
+import { browse, logout, getConfig, fetchThumbnailBatch, AppConfig, BrowseResult, BrowseEntry, downloadUrl, setFileStatus, clearFileStatus, getUserData, saveUserData } from "../api";
 import VideoCard from "../components/VideoCard";
 import Breadcrumbs from "../components/Breadcrumbs";
 import SearchBar from "../components/SearchBar";
@@ -232,6 +232,11 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const [thumbVersion, setThumbVersion] = useState(0);
   const [thumbDataMap, setThumbDataMap] = useState<Record<string, string>>({});
 
+  // Per-directory sort preferences persisted to DB
+  const dirSortMapRef = useRef<Record<string, { sort: string; dir: string }>>({});
+  const dirSortLoadedRef = useRef(false);
+  const dirSortSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Compute parent path for back button
   const parentPath = useMemo(() => {
     const trimmed = currentPath.replace(/\/+$/, "");
@@ -249,7 +254,38 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
       .catch(() => {});
   }, []);
 
+  // Load per-directory sort preferences from server on mount
+  useEffect(() => {
+    getUserData("dir_sort").then((data) => {
+      const map: Record<string, { sort: string; dir: string }> = {};
+      for (const [k, v] of Object.entries(data)) {
+        if (v && typeof v === "object" && "sort" in (v as any)) {
+          map[k] = v as { sort: string; dir: string };
+        }
+      }
+      dirSortMapRef.current = map;
+      dirSortLoadedRef.current = true;
+    }).catch(() => {
+      dirSortLoadedRef.current = true;
+    });
+  }, []);
 
+  // Apply saved sort when entering a directory with default sort params
+  useEffect(() => {
+    if (!dirSortLoadedRef.current) return;
+    // Only apply if URL has default sort (no explicit sort/dir params)
+    if (searchParams.has("sort") || searchParams.has("dir")) return;
+    const saved = dirSortMapRef.current[currentPath];
+    if (saved && (saved.sort !== "alpha" || saved.dir !== "asc")) {
+      const params: Record<string, string> = { path: currentPath };
+      if (currentPage > 1) params.page = String(currentPage);
+      if (currentSearch) params.search = currentSearch;
+      if (activeLetter) params.letter = activeLetter;
+      if (saved.sort !== "alpha") params.sort = saved.sort;
+      if (saved.dir !== "asc") params.dir = saved.dir;
+      setSearchParams(params, { replace: true });
+    }
+  }, [currentPath, dirSortLoadedRef.current]);
 
   useEffect(() => {
     setError("");
@@ -292,7 +328,12 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     saveDirState(currentPath, currentDirState());
     saveScrollPos(currentPath, window.scrollY);
     const params: Record<string, string> = { path };
-    addSortParams(params);
+    // Apply target directory's saved sort, or default
+    const saved = dirSortMapRef.current[path];
+    if (saved) {
+      if (saved.sort !== "alpha") params.sort = saved.sort;
+      if (saved.dir !== "asc") params.dir = saved.dir;
+    }
     setSearchParams(params);
     window.scrollTo({ top: 0 });
   }
@@ -335,6 +376,17 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     if (activeLetter) params.letter = activeLetter;
     addSortParams(params, sort, dir);
     setSearchParams(params);
+
+    // Persist per-directory sort preference to server
+    if (sort === "alpha" && dir === "asc") {
+      delete dirSortMapRef.current[currentPath];
+    } else {
+      dirSortMapRef.current[currentPath] = { sort, dir };
+    }
+    if (dirSortSaveTimerRef.current) clearTimeout(dirSortSaveTimerRef.current);
+    dirSortSaveTimerRef.current = setTimeout(() => {
+      saveUserData("dir_sort", dirSortMapRef.current).catch(() => {});
+    }, 2000);
   }
 
   function buildPlaylist(entries: BrowseEntry[], albumName?: string, coverArt?: string): MusicTrack[] {
@@ -388,6 +440,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
       // Save dir state and scroll position before leaving browse page
       saveDirState(currentPath, currentDirState());
       saveScrollPos(currentPath, window.scrollY);
+      // Mark file as opened (fire-and-forget)
+      setFileStatus(entry.path, "opened").catch(() => {});
       if (music.isVisible) music.dismiss();
       if (entry.is_image) {
         nav(`/gallery?path=${encodeURIComponent(entry.path)}`);
@@ -400,6 +454,18 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
       }
     }
   }
+
+  const handleStatusChange = useCallback(async (path: string, status: "opened" | "completed" | null) => {
+    if (status === null) {
+      await clearFileStatus(path).catch(() => {});
+    } else {
+      await setFileStatus(path, status).catch(() => {});
+    }
+    // Refresh browse data to update statuses
+    browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
+      .then((result) => setData(result))
+      .catch(() => {});
+  }, [currentPath, currentPage, prefs.page_size, currentSearch, activeLetter, currentSort, currentSortDir]);
 
   // Available letters from server response
   const availableLetters = useMemo(() => {
@@ -463,6 +529,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
               <option value="alpha">Name</option>
               <option value="newest">Date</option>
               <option value="largest">Size</option>
+              <option value="recent">Recent</option>
             </select>
             <button
               onClick={() => handleSortChange(currentSort, currentSortDir === "asc" ? "desc" : "asc")}
@@ -659,6 +726,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
                     thumbVersion={thumbVersion}
                     generateOnFly={generateOnFly}
                     thumbData={thumbDataMap[entry.path]}
+                    fileStatus={entry.file_status}
+                    onStatusChange={handleStatusChange}
                   />
                 </div>
               ))}

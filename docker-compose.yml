@@ -4,7 +4,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./config.yml:/config/config.yml:ro
+      - ./data:/data
       - ./media:/media:ro
       - ./cache:/cache
     devices:

@@ -12,6 +12,8 @@ interface Props {
   coverArt?: string;
   isPlaying?: boolean;
   thumbData?: string;
+  fileStatus?: "opened" | "completed";
+  onStatusChange?: (path: string, status: "opened" | "completed" | null) => void;
 }
 
 function formatSize(bytes?: number): string {
@@ -60,8 +62,20 @@ function NowPlayingIndicator() {
   );
 }
 
-export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, thumbVersion, generateOnFly = true, musicMode, coverArt, isPlaying, thumbData }: Props) {
+function CheckmarkIcon({ status }: { status: "opened" | "completed" }) {
+  const color = status === "completed" ? "text-green-400" : "text-gray-400";
+  return (
+    <div className={`absolute top-1 right-1 ${color} drop-shadow-lg z-[5]`}>
+      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
+      </svg>
+    </div>
+  );
+}
+
+export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, thumbVersion, generateOnFly = true, musicMode, coverArt, isPlaying, thumbData, fileStatus, onStatusChange }: Props) {
   const [thumbFailed, setThumbFailed] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
   const genParam = generateOnFly ? "" : "&generate=0";
 
@@ -92,11 +106,21 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
   const aspectClass = musicMode ? "aspect-square" : isBookFormat ? "aspect-[2/3]" : "aspect-video";
 
   return (
+    <>
     <button
       onClick={onClick}
+      onContextMenu={(e) => {
+        if (entry.is_dir || musicMode || !onStatusChange) return;
+        e.preventDefault();
+        setContextMenu({ x: e.clientX, y: e.clientY });
+      }}
       className={`bg-gray-900 rounded-lg overflow-hidden hover:ring-2 hover:ring-blue-500 transition-all text-left group w-full flex flex-col cursor-pointer ${isPlaying ? "ring-2 ring-blue-500" : ""}`}
     >
       <div className={`${aspectClass} bg-gray-800 relative overflow-hidden flex items-center justify-center`}>
+        {/* File status checkmark */}
+        {fileStatus && !entry.is_dir && !musicMode && (
+          <CheckmarkIcon status={fileStatus} />
+        )}
         {thumbUrl && !thumbFailed && (
           <img
             src={thumbUrl}
@@ -169,5 +193,44 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
         )}
       </div>
     </button>
+    {/* Context menu for status toggle */}
+    {contextMenu && onStatusChange && (
+      <>
+        <div className="fixed inset-0 z-50" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+        <div
+          className="fixed z-50 bg-gray-900 border border-gray-700 rounded-lg shadow-lg py-1 min-w-[160px]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          {fileStatus !== "completed" && (
+            <button
+              onClick={() => { onStatusChange(entry.path, "completed"); setContextMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white flex items-center gap-2 cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-green-400" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" /></svg>
+              Mark Completed
+            </button>
+          )}
+          {fileStatus !== "opened" && (
+            <button
+              onClick={() => { onStatusChange(entry.path, "opened"); setContextMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white flex items-center gap-2 cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-gray-400" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" /></svg>
+              Mark Opened
+            </button>
+          )}
+          {fileStatus && (
+            <button
+              onClick={() => { onStatusChange(entry.path, null); setContextMenu(null); }}
+              className="w-full text-left px-3 py-1.5 text-sm text-gray-300 hover:bg-gray-800 hover:text-white flex items-center gap-2 cursor-pointer"
+            >
+              <svg className="w-4 h-4 text-red-400" viewBox="0 0 24 24" fill="currentColor"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" /></svg>
+              Clear Status
+            </button>
+          )}
+        </div>
+      </>
+    )}
+    </>
   );
 }

@@ -13,6 +13,9 @@ import {
   downloadUrl,
   getMarkdownContent,
   getConfig,
+  getUserData,
+  saveUserData,
+  setFileStatus,
 } from "../api";
 
 function isTouchDevice() {
@@ -41,12 +44,30 @@ interface ReadPosition {
   scrollY?: number;
 }
 
+let _positionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
 function savePosition(path: string, pos: ReadPosition) {
   try {
     const raw = localStorage.getItem(POSITION_KEY);
     const map = raw ? JSON.parse(raw) : {};
     map[path] = pos;
     localStorage.setItem(POSITION_KEY, JSON.stringify(map));
+    // Debounced server save (every 5s)
+    if (_positionSaveTimer) clearTimeout(_positionSaveTimer);
+    _positionSaveTimer = setTimeout(() => {
+      saveUserData("read_positions", map).catch(() => {});
+    }, 5000);
+  } catch {}
+}
+
+function flushPositionSave() {
+  if (_positionSaveTimer) {
+    clearTimeout(_positionSaveTimer);
+    _positionSaveTimer = null;
+  }
+  try {
+    const raw = localStorage.getItem(POSITION_KEY);
+    if (raw) saveUserData("read_positions", JSON.parse(raw)).catch(() => {});
   } catch {}
 }
 
@@ -104,6 +125,7 @@ function loadSettings(): ReaderSettings {
 function persistSettings(s: ReaderSettings) {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+    saveUserData("reader_settings", s as unknown as Record<string, unknown>).catch(() => {});
   } catch {}
 }
 
@@ -930,6 +952,34 @@ export default function Reader() {
     }).catch(() => {});
   }, []);
 
+  // Fetch server-saved reader settings and positions on mount, merge with localStorage
+  useEffect(() => {
+    getUserData("reader_settings").then((serverSettings) => {
+      if (serverSettings && Object.keys(serverSettings).length > 0) {
+        setSettings((prev) => {
+          const merged = { ...prev, ...serverSettings } as ReaderSettings;
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }).catch(() => {});
+    getUserData("read_positions").then((serverPositions) => {
+      if (serverPositions && Object.keys(serverPositions).length > 0) {
+        try {
+          const raw = localStorage.getItem(POSITION_KEY);
+          const local = raw ? JSON.parse(raw) : {};
+          const merged = { ...local, ...serverPositions };
+          localStorage.setItem(POSITION_KEY, JSON.stringify(merged));
+        } catch {}
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Flush position save on unmount
+  useEffect(() => {
+    return () => flushPositionSave();
+  }, []);
+
   const [pageInfo, setPageInfo] = useState({ current: 0, total: 0 });
 
   // Sibling files
@@ -1190,7 +1240,10 @@ export default function Reader() {
           <EpubReader
             path={currentPath}
             settings={settings}
-            onPageInfo={(c, t) => setPageInfo({ current: c, total: t })}
+            onPageInfo={(c, t) => {
+              setPageInfo({ current: c, total: t });
+              if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
+            }}
             controlsVisible={controlsVisible}
           />
         )}
@@ -1205,7 +1258,10 @@ export default function Reader() {
             path={currentPath}
             format={format}
             settings={settings}
-            onPageInfo={(c, t) => setPageInfo({ current: c, total: t })}
+            onPageInfo={(c, t) => {
+              setPageInfo({ current: c, total: t });
+              if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
+            }}
             controlsVisible={controlsVisible}
           />
         )}

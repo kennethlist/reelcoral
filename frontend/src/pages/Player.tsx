@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import Hls from "hls.js";
-import { getMediaInfo, startStream, stopStream, MediaInfo, browse, BrowseEntry } from "../api";
+import { getMediaInfo, startStream, stopStream, MediaInfo, browse, BrowseEntry, setFileStatus } from "../api";
 import TrackSelector from "../components/TrackSelector";
 import { usePreferences, SubtitleFontSize } from "../hooks/usePreferences";
 
@@ -65,6 +65,9 @@ export default function Player() {
   const [siblings, setSiblings] = useState<BrowseEntry[]>([]);
   const [siblingIndex, setSiblingIndex] = useState(-1);
 
+  // Track whether we've marked this file as completed
+  const completedRef = useRef(false);
+
   // Burn-in subtitle index: only meaningful when burning in on a non-original profile
   const burnSubIdx = subMode === "burn" && profile !== "original" ? subIdx : null;
 
@@ -83,6 +86,11 @@ export default function Player() {
       sessionRef.current = null;
     }
   }, []);
+
+  // Reset completed tracking when file changes
+  useEffect(() => {
+    completedRef.current = false;
+  }, [filePath]);
 
   // Load media info
   useEffect(() => {
@@ -392,6 +400,13 @@ export default function Player() {
         setSubText(active ? active.text : "");
       } else {
         setSubText("");
+      }
+      // Auto-complete at 95% of duration
+      const absTime = seekOffsetRef.current + video.currentTime;
+      const dur = info?.duration ?? 0;
+      if (dur > 0 && absTime >= dur * 0.95 && !completedRef.current) {
+        completedRef.current = true;
+        setFileStatus(filePath, "completed").catch(() => {});
       }
     };
     const onPlay = () => setPaused(false);

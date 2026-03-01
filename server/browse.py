@@ -1,5 +1,6 @@
 import os
-from flask import Blueprint, request, jsonify, current_app
+from flask import Blueprint, request, jsonify, current_app, session
+import db
 
 browse_bp = Blueprint("browse", __name__)
 
@@ -140,7 +141,16 @@ def browse():
 
     # Sort: directories first, then files sorted by chosen mode and direction
     reverse = sort_dir == "desc"
-    if sort == "newest":
+    if sort == "recent":
+        user_id = session.get("user", "anonymous")
+        recent_map = db.get_recent_files(user_id)
+        # Split into accessed and not-accessed, then combine
+        accessed = [e for e in entries if e.get("path") in recent_map or (not e["is_dir"] and e.get("path") in recent_map)]
+        not_accessed = [e for e in entries if e.get("path") not in recent_map]
+        accessed.sort(key=lambda e: recent_map.get(e.get("path", ""), ""), reverse=not reverse)
+        not_accessed.sort(key=lambda e: e["name"].lower())
+        entries = accessed + not_accessed if not reverse else not_accessed + accessed
+    elif sort == "newest":
         entries.sort(key=lambda e: e.get("mtime", 0), reverse=reverse)
     elif sort == "largest":
         entries.sort(key=lambda e: e.get("size", 0), reverse=reverse)
@@ -173,6 +183,15 @@ def browse():
     else:
         start = (page - 1) * limit
         page_entries = entries[start : start + limit]
+
+    # Attach file_status to page entries
+    user_id = session.get("user", "anonymous")
+    file_paths = [e["path"] for e in page_entries if not e["is_dir"]]
+    if file_paths:
+        statuses = db.get_file_statuses(user_id, file_paths)
+        for e in page_entries:
+            if e["path"] in statuses:
+                e["file_status"] = statuses[e["path"]]
 
     # Build breadcrumbs
     parts = [p for p in rel_path.split("/") if p]

@@ -7,7 +7,9 @@ from flask import Flask, send_from_directory
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
 def load_config():
-    config_path = os.environ.get("MEDIA_CONFIG", "/config/config.yml")
+    config_path = os.environ.get("MEDIA_CONFIG", "/data/config.yml")
+    if not os.path.exists(config_path):
+        config_path = os.path.join(os.path.dirname(__file__), "..", "data", "config.yml")
     if not os.path.exists(config_path):
         config_path = os.path.join(os.path.dirname(__file__), "..", "config.yml")
     with open(config_path) as f:
@@ -35,8 +37,13 @@ def create_app():
     from pdf import pdf_bp
     from download import download_bp
     from markdown_view import markdown_bp
+    from userdata import userdata_bp
+    import db
+
+    db.init_app(app)
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    app.register_blueprint(userdata_bp, url_prefix="/api/user")
     app.register_blueprint(browse_bp, url_prefix="/api")
     app.register_blueprint(stream_bp, url_prefix="/api/stream")
     app.register_blueprint(thumbnail_bp, url_prefix="/api")

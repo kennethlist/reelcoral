@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { getConfig } from "../api";
+import { getConfig, getUserPreferences, saveUserPreferences } from "../api";
 
 export type SubtitleFontSize = "small" | "medium" | "large" | "extra-large";
 
@@ -13,6 +13,8 @@ export interface Preferences {
   thumbnail_candidates: 3 | 6 | 9;
   grid_size: "small" | "large";
   page_size: number;
+  music_volume?: number;
+  music_profile?: string;
 }
 
 const STORAGE_KEY = "media_preferences";
@@ -41,6 +43,7 @@ export function usePreferences() {
   const [prefs, setPrefsState] = useState<Preferences>(() => load(hardcodedDefaults));
 
   useEffect(() => {
+    // Load server defaults from config, then overlay server-saved preferences
     getConfig()
       .then((cfg) => {
         const serverDefaults: Preferences = {
@@ -54,8 +57,23 @@ export function usePreferences() {
           grid_size: (cfg.defaults.grid_size || "small") as "small" | "large",
           page_size: cfg.defaults.page_size || 12,
         };
-        // Re-load: localStorage overrides take precedence over server defaults
-        setPrefsState(load(serverDefaults));
+        // Load from localStorage over server defaults
+        const localPrefs = load(serverDefaults);
+
+        // Now fetch server-saved preferences and merge (server wins over localStorage)
+        getUserPreferences()
+          .then((serverPrefs) => {
+            if (serverPrefs && Object.keys(serverPrefs).length > 0) {
+              const merged = { ...localPrefs, ...serverPrefs } as Preferences;
+              setPrefsState(merged);
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+            } else {
+              setPrefsState(localPrefs);
+            }
+          })
+          .catch(() => {
+            setPrefsState(localPrefs);
+          });
       })
       .catch(() => {});
   }, []);
@@ -64,6 +82,8 @@ export function usePreferences() {
     setPrefsState((prev) => {
       const next = { ...prev, ...update };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      // Fire-and-forget save to server
+      saveUserPreferences(next).catch(() => {});
       return next;
     });
   }, []);
