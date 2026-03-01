@@ -62,6 +62,8 @@ export default function Gallery() {
     if (img && img.path !== currentPath) {
       setSearchParams({ path: img.path }, { replace: true });
     }
+    // Mark current image as viewed
+    if (img) setFileStatus(img.path, "opened").catch(() => {});
     // Auto-complete when viewing the last image
     if (currentIndex === images.length - 1 && images.length > 0) {
       setFileStatus(images[currentIndex].path, "completed").catch(() => {});
@@ -217,7 +219,8 @@ export default function Gallery() {
       {/* Top bar */}
       <div
         data-controls
-        className={`absolute top-0 left-0 right-0 z-10 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+1rem))] bg-gradient-to-b from-black/80 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        className={`absolute top-0 left-0 right-0 z-20 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+1rem))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        style={{ paddingBottom: "3rem" }}
       >
         <div className="flex items-center gap-4">
           <button
@@ -252,11 +255,11 @@ export default function Gallery() {
         </div>
       )}
 
-      {/* Desktop-only left arrow */}
-      {!isTouch && hasPrev && (
+      {/* Left arrow */}
+      {hasPrev && (
         <button
           onClick={() => goTo(-1)}
-          className={`absolute left-0 top-14 bottom-0 w-16 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`absolute left-0 top-14 bottom-0 w-12 z-10 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
             <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -266,11 +269,11 @@ export default function Gallery() {
         </button>
       )}
 
-      {/* Desktop-only right arrow */}
-      {!isTouch && hasNext && (
+      {/* Right arrow */}
+      {hasNext && (
         <button
           onClick={() => goTo(1)}
-          className={`absolute right-0 top-14 bottom-0 w-16 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          className={`absolute right-0 top-14 bottom-0 w-12 z-10 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
             <svg className="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>

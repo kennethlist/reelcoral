@@ -90,6 +90,7 @@ export default function Player() {
   // Reset completed tracking when file changes
   useEffect(() => {
     completedRef.current = false;
+    if (filePath) setFileStatus(filePath, "opened").catch(() => {});
   }, [filePath]);
 
   // Load media info
