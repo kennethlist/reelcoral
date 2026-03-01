@@ -3,7 +3,7 @@ import { useSearchParams, useNavigate } from "react-router-dom";
 import Hls from "hls.js";
 import { getMediaInfo, startStream, stopStream, MediaInfo, browse, BrowseEntry, setFileStatus } from "../api";
 import TrackSelector from "../components/TrackSelector";
-import { usePreferences, SubtitleFontSize } from "../hooks/usePreferences";
+import { usePreferences, SubtitleFontSize, Preferences } from "../hooks/usePreferences";
 
 const subtitleSizeClass: Record<SubtitleFontSize, string> = {
   "small": "text-xl",
@@ -90,6 +90,10 @@ export default function Player() {
   // Reset completed tracking when file changes
   useEffect(() => {
     completedRef.current = false;
+    setSeekTarget(null);
+    seekOffsetRef.current = 0;
+    subOffsetRef.current = 0;
+    setCurrentTime(0);
     if (filePath) setFileStatus(filePath, "opened").catch(() => {});
   }, [filePath]);
 
@@ -648,11 +652,12 @@ export default function Player() {
       setSeekTarget(currentPosition());
     }
     setSubIdx(idx);
-    setPrefs({ subtitles_enabled: idx !== null });
+    const update: Partial<Preferences> = { subtitles_enabled: idx !== null };
     if (idx !== null) {
       const track = info?.subtitle_tracks.find((t) => t.index === idx);
-      if (track) setPrefs({ preferred_subtitle_lang: track.lang });
+      if (track) update.preferred_subtitle_lang = track.lang;
     }
+    setPrefs(update);
   }
 
   function handleSubModeChange(mode: "burn" | "external") {
