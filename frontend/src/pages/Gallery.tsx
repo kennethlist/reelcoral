@@ -108,8 +108,8 @@ export default function Gallery() {
   // Show controls on mount
   useEffect(() => {
     if (isTouch) {
-      // On mobile, start with controls visible (no auto-hide)
-      setControlsVisible(true);
+      // On mobile, start with controls hidden — tap center to show
+      setControlsVisible(false);
     } else {
       showControls();
     }
