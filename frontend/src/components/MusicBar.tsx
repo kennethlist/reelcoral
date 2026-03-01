@@ -52,7 +52,7 @@ export default function MusicBar() {
 
   if (!isVisible || !track) return null;
 
-  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+  const progress = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
 
   function handleProgressClick(e: React.MouseEvent) {
     const bar = progressRef.current;
@@ -128,7 +128,7 @@ export default function MusicBar() {
         <span className="text-xs text-gray-400 w-10 text-right flex-shrink-0">{formatTime(currentTime)}</span>
         <div
           ref={progressRef}
-          className="flex-1 h-1.5 bg-gray-700 rounded-full cursor-pointer group relative"
+          className="flex-1 h-1.5 bg-gray-700 rounded-full cursor-pointer group relative overflow-hidden"
           onClick={handleProgressClick}
         >
           <div

@@ -20,6 +20,8 @@ export default function Gallery() {
   const [isTouch] = useState(() => isTouchDevice());
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const currentIndexRef = useRef(currentIndex);
+  useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
   // Load all media files from the parent directory,
   // respecting any active filters from the browse page
@@ -73,7 +75,8 @@ export default function Gallery() {
   const goTo = useCallback(
     (delta: number) => {
       // Navigate within all files (images + videos) in directory order
-      const currentImage = images[currentIndex];
+      const idx = currentIndexRef.current;
+      const currentImage = images[idx];
       if (!currentImage) return;
       // Mark current file as viewed before navigating away
       setFileStatus(currentImage.path, "opened").catch(() => {});
@@ -85,7 +88,10 @@ export default function Gallery() {
       if (nextEntry.is_image) {
         // Find index in images array
         const nextImgIdx = images.findIndex((e) => e.path === nextEntry.path);
-        if (nextImgIdx >= 0) setCurrentIndex(nextImgIdx);
+        if (nextImgIdx >= 0) {
+          currentIndexRef.current = nextImgIdx;
+          setCurrentIndex(nextImgIdx);
+        }
       } else if (nextEntry.is_audio) {
         nav(`/audio?path=${encodeURIComponent(nextEntry.path)}`, { replace: true });
       } else {
@@ -93,7 +99,7 @@ export default function Gallery() {
         nav(`/play?path=${encodeURIComponent(nextEntry.path)}`, { replace: true });
       }
     },
-    [images, currentIndex, allFiles, nav]
+    [images, allFiles, nav]
   );
 
   // Desktop: auto-hide controls on mouse move
