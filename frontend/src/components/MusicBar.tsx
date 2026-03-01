@@ -39,15 +39,19 @@ export default function MusicBar() {
   const nav = useNavigate();
   const track = playlist[currentIndex] || null;
 
-  // Close dropdowns on outside click
+  // Close dropdowns on outside click/touch
   useEffect(() => {
     if (!showQuality && !showVolume) return;
-    function handleClick(e: MouseEvent) {
+    function handleClick(e: Event) {
       if (showQuality && qualityRef.current && !qualityRef.current.contains(e.target as Node)) setShowQuality(false);
       if (showVolume && volumeRef.current && !volumeRef.current.contains(e.target as Node)) setShowVolume(false);
     }
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    document.addEventListener("touchstart", handleClick);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("touchstart", handleClick);
+    };
   }, [showQuality, showVolume]);
 
   if (!isVisible || !track) return null;
