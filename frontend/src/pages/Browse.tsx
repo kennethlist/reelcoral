@@ -604,13 +604,13 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
                 return (
                   <div
                     key={entry.path}
-                    className={`flex items-center gap-3 px-4 py-3 transition-colors group/row ${
+                    className={`flex items-stretch gap-0 transition-colors group/row ${
                       isCurrentTrack ? "bg-blue-600/20 text-white" : `${i % 2 === 0 ? "bg-gray-900" : "bg-gray-900/60"} hover:bg-gray-800 text-gray-300 hover:text-white`
                     }`}
                   >
                     <button
                       onClick={() => handleEntryClick(entry)}
-                      className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer"
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left cursor-pointer px-4 py-3"
                     >
                       <span className="w-8 text-center text-xs text-gray-500 flex-shrink-0">
                         {isCurrentTrack && music.isPlaying ? (
@@ -631,11 +631,11 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
                       <span className="flex-1 text-sm truncate">{entry.name}</span>
                     </button>
                     {entry.size != null && (
-                      <span className="text-xs text-gray-500 flex-shrink-0">{formatSize(entry.size)}</span>
+                      <span className="text-xs text-gray-500 flex-shrink-0 self-center">{formatSize(entry.size)}</span>
                     )}
                     <button
                       onClick={() => handleEntryClick(entry)}
-                      className="text-gray-500 hover:text-white transition-colors cursor-pointer p-1 flex-shrink-0 opacity-0 group-hover/row:opacity-100"
+                      className="text-gray-500 hover:text-white transition-colors cursor-pointer p-1 pr-4 flex-shrink-0 opacity-0 group-hover/row:opacity-100 self-center"
                       title="Play"
                     >
                       <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">

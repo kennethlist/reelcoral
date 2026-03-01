@@ -1,9 +1,33 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, BrowseEntry, setFileStatus } from "../api";
+import { browse, BrowseEntry, setFileStatus, downloadUrl } from "../api";
 
 function isTouchDevice() {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
+}
+
+const SETTINGS_KEY = "rc-reader-settings";
+type PageDirection = "normal" | "reverse" | "horseshoe";
+type PageFit = "width" | "height" | "page";
+
+function loadSetting<T>(key: string, valid: T[], fallback: T): T {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) {
+      const val = JSON.parse(raw)[key];
+      if ((valid as unknown[]).includes(val)) return val as T;
+    }
+  } catch {}
+  return fallback;
+}
+
+function saveSetting(key: string, value: string) {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    const settings = raw ? JSON.parse(raw) : {};
+    settings[key] = value;
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {}
 }
 
 export default function Gallery() {
@@ -18,9 +42,13 @@ export default function Gallery() {
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTouch] = useState(() => isTouchDevice());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [pageDirection, setPageDirection] = useState<PageDirection>(() => loadSetting("pageDirection", ["normal", "reverse", "horseshoe"], "normal"));
+  const [pageFit, setPageFit] = useState<PageFit>(() => loadSetting("galleryFit", ["width", "height", "page"], "page"));
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const hoveringControlsRef = useRef(false);
+
   const containerRef = useRef<HTMLDivElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
   const currentIndexRef = useRef(currentIndex);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
@@ -108,19 +136,9 @@ export default function Gallery() {
     setControlsVisible(true);
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     hideTimerRef.current = setTimeout(() => {
-      if (!hoveringControlsRef.current) setControlsVisible(false);
+      if (!settingsOpen) setControlsVisible(false);
     }, 500);
-  }, []);
-
-  const handleControlsEnter = useCallback(() => {
-    hoveringControlsRef.current = true;
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-  }, []);
-
-  const handleControlsLeave = useCallback(() => {
-    hoveringControlsRef.current = false;
-    showControls();
-  }, [showControls]);
+  }, [settingsOpen]);
 
   // Show controls on mount
   useEffect(() => {
@@ -132,18 +150,36 @@ export default function Gallery() {
     }
   }, [showControls, isTouch]);
 
-  const handleMouseMove = useCallback(() => {
-    if (!isTouch) showControls();
-  }, [showControls, isTouch]);
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    if (isTouch) return;
+    const overControls = (e.target as HTMLElement).closest("[data-controls]");
+    setControlsVisible(true);
+    if (overControls) {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    } else {
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = setTimeout(() => {
+        if (!settingsOpen) setControlsVisible(false);
+      }, 500);
+    }
+  }, [isTouch, settingsOpen]);
 
   const handleMouseLeave = useCallback(() => {
-    if (!isTouch) {
+    if (!isTouch && !settingsOpen) {
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       setControlsVisible(false);
     }
-  }, [isTouch]);
+  }, [isTouch, settingsOpen]);
 
-  // Mobile: tap zones — left third prev, right third next, middle toggles overlay
+  // Keep controls visible while settings open
+  useEffect(() => {
+    if (settingsOpen) {
+      setControlsVisible(true);
+      if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+    }
+  }, [settingsOpen]);
+
+  // Mobile: tap zones — direction-aware
   const handleTap = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!isTouch) return;
@@ -153,17 +189,33 @@ export default function Gallery() {
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
       const x = e.clientX - rect.left;
-      const third = rect.width / 3;
+      const y = e.clientY - rect.top;
 
-      if (x < third) {
-        goTo(-1);
-      } else if (x > third * 2) {
-        goTo(1);
+      if (pageDirection === "horseshoe") {
+        // 3x3 grid: top row=next, middle(left=next, center=toggle, right=next), bottom(left=next, center=prev, right=next)
+        const col = x < rect.width / 3 ? 0 : x > (rect.width * 2) / 3 ? 2 : 1;
+        const row = y < rect.height * 0.3 ? 0 : y > rect.height * 0.7 ? 2 : 1;
+        if (row === 1 && col === 1) {
+          setControlsVisible((v) => !v);
+        } else if (row === 2 && col === 1) {
+          goTo(-1); // bottom center = prev
+        } else {
+          goTo(1); // everything else = next
+        }
       } else {
-        setControlsVisible((v) => !v);
+        const third = rect.width / 3;
+        const leftDelta = pageDirection === "reverse" ? 1 : -1;
+        const rightDelta = pageDirection === "reverse" ? -1 : 1;
+        if (x < third) {
+          goTo(leftDelta);
+        } else if (x > third * 2) {
+          goTo(rightDelta);
+        } else {
+          setControlsVisible((v) => !v);
+        }
       }
     },
-    [isTouch, goTo]
+    [isTouch, goTo, pageDirection]
   );
 
   function toggleFullscreen() {
@@ -180,17 +232,35 @@ export default function Gallery() {
     return () => document.removeEventListener("fullscreenchange", onFs);
   }, []);
 
+  // Close settings on outside click
+  useEffect(() => {
+    if (!settingsOpen) return;
+    const handler = (e: Event) => {
+      if (settingsRef.current && !settingsRef.current.contains(e.target as Node)) {
+        setSettingsOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    document.addEventListener("touchstart", handler);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      document.removeEventListener("touchstart", handler);
+    };
+  }, [settingsOpen]);
+
   // Keyboard navigation
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "ArrowLeft") { goTo(-1); }
-      else if (e.key === "ArrowRight") { goTo(1); }
+      if (e.key === "ArrowLeft") { goTo(pageDirection === "reverse" ? 1 : -1); }
+      else if (e.key === "ArrowRight") { goTo(pageDirection === "reverse" ? -1 : 1); }
+      else if (e.key === "ArrowUp") { goTo(pageDirection === "horseshoe" ? 1 : -1); }
+      else if (e.key === "ArrowDown") { goTo(pageDirection === "horseshoe" ? -1 : 1); }
       else if (e.key === "Escape") goBack();
       else if (e.key === "f") toggleFullscreen();
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [goTo, nav, showControls]);
+  }, [goTo, nav, showControls, pageDirection]);
 
   const currentImage = images[currentIndex];
   // Determine prev/next based on position in allFiles (not just images)
@@ -236,15 +306,13 @@ export default function Gallery() {
       {/* Top bar */}
       <div
         data-controls
-        onMouseEnter={handleControlsEnter}
-        onMouseLeave={handleControlsLeave}
         className={`absolute top-0 left-0 right-0 z-20 px-5 py-5 pt-[max(1.25rem,calc(env(safe-area-inset-top)+1rem))] bg-gradient-to-b from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         style={{ paddingBottom: "3rem" }}
       >
         <div className="flex items-center gap-4">
           <button
             onClick={goBack}
-            className="text-white/80 hover:text-white transition-colors shrink-0 cursor-pointer"
+            className="text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer"
           >
             <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5M12 19l-7-7 7-7" />
@@ -255,20 +323,86 @@ export default function Gallery() {
             {currentImage?.name}
           </div>
           {allFiles.length > 1 && allIdx >= 0 && (
-            <div className="text-sm text-gray-400 tabular-nums whitespace-nowrap">
+            <div className="text-sm text-gray-200 tabular-nums whitespace-nowrap">
               {allIdx + 1} / {allFiles.length}
             </div>
           )}
+          {/* Download */}
+          {currentImage && (
+            <a
+              href={downloadUrl(currentImage.path)}
+              className="text-white/80 hover:text-white transition-colors cursor-pointer"
+              title="Download"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14M5 12l7 7 7-7" />
+                <path strokeLinecap="round" d="M5 20h14" />
+              </svg>
+            </a>
+          )}
+          {/* Settings gear */}
+          <div className="relative shrink-0 flex items-center" ref={settingsRef}>
+            <button
+              onClick={() => setSettingsOpen((v) => !v)}
+              className="text-white/80 hover:text-white transition-colors cursor-pointer"
+              title="Settings"
+            >
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+            {settingsOpen && (
+              <div
+                data-controls
+                className="absolute top-full mt-2 right-0 bg-gray-900 border border-gray-700 sm:rounded-l-xl sm:rounded-r-xl rounded-lg shadow-2xl p-4 w-64"
+              >
+                <label className="text-xs text-gray-400 mb-1 block">Page fit</label>
+                <div className="flex gap-1 mb-3">
+                  {(["width", "height", "page"] as const).map((fit) => (
+                    <button
+                      key={fit}
+                      onClick={() => { setPageFit(fit); saveSetting("galleryFit", fit); }}
+                      className={`flex-1 px-2 py-1 text-xs rounded cursor-pointer ${
+                        pageFit === fit
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-700 text-gray-300"
+                      }`}
+                    >
+                      {fit[0].toUpperCase() + fit.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <label className="text-xs text-gray-400 mb-1 block">Page direction</label>
+                <div className="flex gap-1">
+                  {(["normal", "reverse", "horseshoe"] as const).map((dir) => (
+                    <button
+                      key={dir}
+                      onClick={() => { setPageDirection(dir); saveSetting("pageDirection", dir); }}
+                      className={`flex-1 px-2 py-1 text-xs rounded cursor-pointer ${
+                        pageDirection === dir
+                          ? "bg-blue-600 text-white"
+                          : "bg-gray-700 text-gray-300"
+                      }`}
+                    >
+                      {dir[0].toUpperCase() + dir.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Image area */}
       {currentImage && (
-        <div className="absolute inset-0 flex items-center justify-center" style={{ paddingTop: "env(safe-area-inset-top)" }}>
+        <div className={`absolute inset-0 flex ${pageFit === "width" ? "items-start overflow-y-auto" : "items-center"} justify-center`} style={{ paddingTop: "env(safe-area-inset-top)" }}>
           <img
             src={`/api/image?path=${encodeURIComponent(currentImage.path)}`}
             alt={currentImage.name}
-            className="w-full h-full object-contain"
+            className={pageFit === "width" ? "w-full h-auto" : pageFit === "height" ? "h-full w-auto" : "w-full h-full object-contain"}
             draggable={false}
           />
         </div>
@@ -279,8 +413,6 @@ export default function Gallery() {
         <button
           data-controls
           onClick={() => goTo(-1)}
-          onMouseEnter={handleControlsEnter}
-          onMouseLeave={handleControlsLeave}
           className={`absolute left-0 top-14 bottom-0 w-12 z-10 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
@@ -296,8 +428,6 @@ export default function Gallery() {
         <button
           data-controls
           onClick={() => goTo(1)}
-          onMouseEnter={handleControlsEnter}
-          onMouseLeave={handleControlsLeave}
           className={`absolute right-0 top-14 bottom-0 w-12 z-10 flex items-center justify-center transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">
@@ -313,8 +443,6 @@ export default function Gallery() {
         <button
           data-controls
           onClick={toggleFullscreen}
-          onMouseEnter={handleControlsEnter}
-          onMouseLeave={handleControlsLeave}
           className={`absolute bottom-4 right-4 z-10 transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
         >
           <div className="bg-black/50 rounded-full p-2">

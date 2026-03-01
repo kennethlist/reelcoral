@@ -443,6 +443,7 @@ export default function Player() {
   settingsOpenRef.current = settingsOpen;
 
   const isMobileRef = useRef("ontouchend" in window);
+  const suppressShowUntilRef = useRef(0);
 
   const scheduleHide = useCallback((delay?: number) => {
     if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
@@ -471,6 +472,7 @@ export default function Player() {
 
   const handleMouseMove = useCallback((e: React.MouseEvent) => {
     if ("ontouchend" in window) return; // Ignore phantom mouse events on touch devices
+    if (Date.now() < suppressShowUntilRef.current) return;
     const target = e.target as HTMLElement;
     const overControls = target.closest("[data-controls]") || target.closest("[data-controls-inner]");
     setControlsVisible(true);
@@ -511,6 +513,7 @@ export default function Player() {
       }
     } else {
       // Desktop: click empty area to toggle play/pause
+      if (videoRef.current?.paused) suppressShowUntilRef.current = Date.now() + 600;
       togglePlayPause();
     }
   }, [scheduleHide, controlsVisible]);
@@ -534,6 +537,7 @@ export default function Player() {
       if (!video) return;
       if (e.key === " " || e.key === "k") {
         e.preventDefault();
+        if (video.paused) suppressShowUntilRef.current = Date.now() + 600;
         video.paused ? video.play() : video.pause();
       } else if (e.key === "f") {
         e.preventDefault();
@@ -729,11 +733,10 @@ export default function Player() {
 
       {/* Controls overlay */}
       <div
-        data-controls
         className={`absolute inset-0 flex flex-col justify-between transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
       >
         {/* Top gradient bar */}
-        <div className="bg-gradient-to-b from-black/70 to-transparent px-4 py-3 pt-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))] flex items-center gap-3">
+        <div data-controls className="bg-gradient-to-b from-black/70 to-transparent px-4 py-3 pt-[max(0.75rem,calc(env(safe-area-inset-top)+0.5rem))] flex items-center gap-3">
           <button
             onClick={goBack}
             className="text-gray-300 hover:text-white transition-colors shrink-0 cursor-pointer"
@@ -773,7 +776,12 @@ export default function Player() {
           {/* Large centered play/pause button */}
           <button
             data-controls
-            onClick={(e) => { e.stopPropagation(); const wasPaused = videoRef.current?.paused; togglePlayPause(); if (isMobile && wasPaused) setControlsVisible(false); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const wasPaused = videoRef.current?.paused;
+              togglePlayPause();
+              if (wasPaused) { suppressShowUntilRef.current = Date.now() + 600; if (isMobile) setControlsVisible(false); }
+            }}
             className="pointer-events-auto bg-black/40 rounded-full p-4 text-white hover:text-blue-400 transition-all hover:scale-110 cursor-pointer"
           >
             {paused ? (

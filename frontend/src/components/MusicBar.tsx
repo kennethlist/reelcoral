@@ -189,7 +189,7 @@ export default function MusicBar() {
           )}
         </button>
         {showVolume && (
-          <div className="absolute bottom-full mb-2 right-0 bg-gray-900 border border-gray-700 rounded-lg shadow-lg p-3 w-10 h-32 flex flex-col items-center">
+          <div className="absolute bottom-full mb-2 right-0 bg-gray-900 border border-gray-700 rounded-lg shadow-lg p-3 w-10 h-32 flex flex-col items-center overflow-hidden">
             <input
               type="range"
               min="0"
@@ -197,7 +197,7 @@ export default function MusicBar() {
               step="0.01"
               value={volume}
               onChange={(e) => setVolume(parseFloat(e.target.value))}
-              className="w-24 accent-blue-500 cursor-pointer"
+              className="w-full h-full accent-blue-500 cursor-pointer"
               style={{ writingMode: "vertical-lr", direction: "rtl" }}
             />
           </div>

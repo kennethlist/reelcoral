@@ -725,7 +725,7 @@ function SettingsPanel({
   return (
     <div
       data-controls
-      className="absolute top-12 right-0 z-30 w-full sm:max-w-sm bg-gray-900 border border-gray-700 sm:rounded-l-xl sm:rounded-br-xl shadow-2xl"
+      className="absolute top-full mt-2 right-0 z-30 w-[calc(100vw-2rem)] sm:w-96 bg-gray-900 border border-gray-700 rounded-xl shadow-2xl"
     >
       <div className="p-4 flex items-center justify-between border-b border-gray-800">
         <span className="text-sm font-medium text-white">Reader Settings</span>
@@ -1221,16 +1221,26 @@ export default function Reader() {
           </a>
 
           {/* Settings gear */}
-          <button
-            onClick={() => setSettingsOpen((v) => !v)}
-            className="text-white/80 hover:text-white transition-colors cursor-pointer"
-            title="Settings"
-          >
-            <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
+          <div className="relative shrink-0 flex items-center" ref={settingsRef}>
+            <button
+              onClick={() => setSettingsOpen((v) => !v)}
+              className="text-white/80 hover:text-white transition-colors cursor-pointer"
+              title="Settings"
+            >
+              <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              </svg>
+            </button>
+            {settingsOpen && (
+              <SettingsPanel
+                format={format}
+                settings={settings}
+                onChange={setSettings}
+                onClose={() => setSettingsOpen(false)}
+              />
+            )}
+          </div>
         </div>
       </div>
 
@@ -1474,17 +1484,6 @@ export default function Reader() {
         </button>
       )}
 
-      {/* Settings panel */}
-      {settingsOpen && (
-        <div ref={settingsRef}>
-          <SettingsPanel
-            format={format}
-            settings={settings}
-            onChange={setSettings}
-            onClose={() => setSettingsOpen(false)}
-          />
-        </div>
-      )}
 
       {/* EPUB global styles */}
       <style>{`
