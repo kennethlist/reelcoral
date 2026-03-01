@@ -767,8 +767,17 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           path={editingThumbnail}
           onClose={() => setEditingThumbnail(null)}
           onSaved={() => {
+            const edited = editingThumbnail;
             setEditingThumbnail(null);
             setThumbVersion((v) => v + 1);
+            // Clear stale batch-fetched thumbnail so the card uses the
+            // versioned URL which will fetch the freshly-saved image.
+            setThumbDataMap((prev) => {
+              if (!edited || !(edited in prev)) return prev;
+              const next = { ...prev };
+              delete next[edited];
+              return next;
+            });
           }}
         />
       )}
