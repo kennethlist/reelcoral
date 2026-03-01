@@ -572,7 +572,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         {data && data.entries.length > 0 && data.is_music_folder && (
           <>
             {/* Album level: Play All header + song list */}
-            <div className="mb-4 flex items-center gap-3">
+            <div className="mb-4 flex items-center gap-3 mr-8">
               {data.cover_art && (
                 <img
                   src={`/api/image?path=${encodeURIComponent(data.cover_art)}`}

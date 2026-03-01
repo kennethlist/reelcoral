@@ -925,6 +925,11 @@ export default function Reader() {
   const currentPath = searchParams.get("path") || "";
   const format = useMemo(() => detectFormat(currentPath), [currentPath]);
 
+  // Mark file as viewed on open
+  useEffect(() => {
+    if (currentPath) setFileStatus(currentPath, "opened").catch(() => {});
+  }, [currentPath]);
+
   const [controlsVisible, setControlsVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pageInputFocused, setPageInputFocused] = useState(false);
