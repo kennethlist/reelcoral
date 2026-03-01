@@ -1,6 +1,7 @@
 import os
 import logging
 import yaml
+from datetime import timedelta
 from flask import Flask, send_from_directory
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -17,6 +18,7 @@ def create_app():
 
     app = Flask(__name__, static_folder=None)
     app.secret_key = config["server"]["secret"]
+    app.permanent_session_lifetime = timedelta(days=365)
     app.config["MEDIA"] = config
 
     from auth import auth_bp, login_required_api

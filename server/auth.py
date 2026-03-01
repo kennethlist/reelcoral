@@ -19,6 +19,7 @@ def login():
     for user in users:
         if user["username"] == username and user["password"] == password:
             session["user"] = username
+            session.permanent = True
             return jsonify({"ok": True, "username": username})
 
     return jsonify({"error": "invalid credentials"}), 401

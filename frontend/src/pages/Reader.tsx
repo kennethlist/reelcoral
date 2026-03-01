@@ -77,6 +77,7 @@ interface ReaderSettings {
   pdfFit: "width" | "height" | "page";
   // All
   navMode: "page" | "scroll";
+  pageDirection: "normal" | "reverse" | "horseshoe";
 }
 
 const defaultSettings: ReaderSettings = {
@@ -89,6 +90,7 @@ const defaultSettings: ReaderSettings = {
   showEpubPages: true,
   pdfFit: "width",
   navMode: "page",
+  pageDirection: "normal",
 };
 
 function loadSettings(): ReaderSettings {
@@ -732,6 +734,28 @@ function SettingsPanel({
         </div>
         )}
 
+        {/* Page direction — all formats except markdown */}
+        {format !== "md" && (
+        <div>
+          <label className="text-xs text-gray-400 mb-1 block">Page direction</label>
+          <div className="flex gap-1">
+            {(["normal", "reverse", "horseshoe"] as const).map((dir) => (
+              <button
+                key={dir}
+                onClick={() => update({ pageDirection: dir })}
+                className={`flex-1 px-2 py-1 text-xs rounded cursor-pointer ${
+                  settings.pageDirection === dir
+                    ? "bg-blue-600 text-white"
+                    : "bg-gray-700 text-gray-300"
+                }`}
+              >
+                {dir[0].toUpperCase() + dir.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+        )}
+
         {/* EPUB / Markdown settings */}
         {(format === "epub" || format === "md") && (
           <>
@@ -879,7 +903,7 @@ export default function Reader() {
   const currentPath = searchParams.get("path") || "";
   const format = useMemo(() => detectFormat(currentPath), [currentPath]);
 
-  const [controlsVisible, setControlsVisible] = useState(true);
+  const [controlsVisible, setControlsVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pageInputFocused, setPageInputFocused] = useState(false);
   const [pageInputValue, setPageInputValue] = useState("");
@@ -1068,21 +1092,21 @@ export default function Reader() {
         }
       } else if (e.key === "ArrowUp") {
         e.preventDefault();
-        (window as any).__readerNav?.(-1);
+        (window as any).__readerNav?.(settings.pageDirection === "horseshoe" ? 1 : -1);
       } else if (e.key === "ArrowDown") {
         e.preventDefault();
-        (window as any).__readerNav?.(1);
+        (window as any).__readerNav?.(settings.pageDirection === "horseshoe" ? -1 : 1);
       } else if (e.key === "ArrowLeft") {
         e.preventDefault();
-        (window as any).__readerNav?.(-1);
+        (window as any).__readerNav?.(settings.pageDirection === "reverse" ? 1 : -1);
       } else if (e.key === "ArrowRight") {
         e.preventDefault();
-        (window as any).__readerNav?.(1);
+        (window as any).__readerNav?.(settings.pageDirection === "reverse" ? -1 : 1);
       }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [controlsVisible, settingsOpen, goToSibling]);
+  }, [controlsVisible, settingsOpen, goToSibling, settings.pageDirection]);
 
   function goBack() {
     const parentDir = currentPath.substring(0, currentPath.lastIndexOf("/")) || "/";
@@ -1190,24 +1214,58 @@ export default function Reader() {
       {/* Invisible tap zones for navigation and overlay toggle */}
       {!settingsOpen && !pageInputFocused && (
         settings.navMode === "page" ? (
-          <div className="absolute inset-0 z-10 flex">
-            <div
-              className="w-1/3 h-full"
-              onClick={() => (window as any).__readerNav?.(-1)}
-            />
-            <div
-              className="w-1/3 h-full"
-              onClick={() => {
-                if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-                suppressShowUntilRef.current = Date.now() + 300;
-                setControlsVisible((v) => !v);
-              }}
-            />
-            <div
-              className="w-1/3 h-full"
-              onClick={() => (window as any).__readerNav?.(1)}
-            />
-          </div>
+          settings.pageDirection === "horseshoe" ? (
+            <div className="absolute inset-0 z-10 grid grid-cols-3 grid-rows-[30%_40%_30%]">
+              {/* Top row: full width, next */}
+              <div
+                className="col-span-3"
+                onClick={() => (window as any).__readerNav?.(1)}
+              />
+              {/* Middle row: left=next, center=overlay, right=next */}
+              <div
+                onClick={() => (window as any).__readerNav?.(1)}
+              />
+              <div
+                onClick={() => {
+                  if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+                  suppressShowUntilRef.current = Date.now() + 300;
+                  setControlsVisible((v) => !v);
+                }}
+              />
+              <div
+                onClick={() => (window as any).__readerNav?.(1)}
+              />
+              {/* Bottom row: left=next, center=prev, right=next */}
+              <div
+                onClick={() => (window as any).__readerNav?.(1)}
+              />
+              <div
+                onClick={() => (window as any).__readerNav?.(-1)}
+              />
+              <div
+                onClick={() => (window as any).__readerNav?.(1)}
+              />
+            </div>
+          ) : (
+            <div className="absolute inset-0 z-10 flex">
+              <div
+                className="w-1/3 h-full"
+                onClick={() => (window as any).__readerNav?.(settings.pageDirection === "reverse" ? 1 : -1)}
+              />
+              <div
+                className="w-1/3 h-full"
+                onClick={() => {
+                  if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
+                  suppressShowUntilRef.current = Date.now() + 300;
+                  setControlsVisible((v) => !v);
+                }}
+              />
+              <div
+                className="w-1/3 h-full"
+                onClick={() => (window as any).__readerNav?.(settings.pageDirection === "reverse" ? -1 : 1)}
+              />
+            </div>
+          )
         ) : (
           /* Scroll mode: only a center overlay toggle that doesn't block scrolling */
           <div className="absolute inset-0 z-10 flex pointer-events-none">
@@ -1337,7 +1395,7 @@ export default function Reader() {
         <button
           data-controls
           onClick={() => goToSibling(-1)}
-          className="absolute left-0 top-14 bottom-0 w-12 flex items-center justify-center transition-opacity duration-300 cursor-pointer opacity-60 hover:opacity-100"
+          className="absolute left-0 top-14 bottom-0 w-12 z-20 flex items-center justify-center transition-opacity duration-300 cursor-pointer opacity-60 hover:opacity-100"
         >
           <div className="bg-black/50 rounded-full p-2">
             <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
@@ -1350,7 +1408,7 @@ export default function Reader() {
         <button
           data-controls
           onClick={() => goToSibling(1)}
-          className="absolute right-0 top-14 bottom-0 w-12 flex items-center justify-center transition-opacity duration-300 cursor-pointer opacity-60 hover:opacity-100"
+          className="absolute right-0 top-14 bottom-0 w-12 z-20 flex items-center justify-center transition-opacity duration-300 cursor-pointer opacity-60 hover:opacity-100"
         >
           <div className="bg-black/50 rounded-full p-2">
             <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>

@@ -151,7 +151,7 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
         {musicMode && entry.is_dir && onPlayAll && (
           <div
             onClick={(e) => { e.stopPropagation(); onPlayAll(); }}
-            className="absolute bottom-2 right-2 bg-blue-600 hover:bg-blue-500 rounded-full p-2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer shadow-lg"
+            className="absolute bottom-2 right-2 bg-blue-600 hover:bg-blue-500 rounded-full p-2 opacity-0 group-hover:opacity-100 max-[768px]:opacity-100 transition-opacity cursor-pointer shadow-lg"
             title="Play All"
           >
             <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor">

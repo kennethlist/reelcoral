@@ -96,7 +96,16 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) audioRef.current.volume = volume;
   }, [volume]);
 
+  const ensureProfiles = useCallback(() => {
+    if (availableProfiles.length === 0) {
+      getConfig()
+        .then((cfg) => setAvailableProfiles(cfg.music_profiles || []))
+        .catch(() => {});
+    }
+  }, [availableProfiles.length]);
+
   const playAll = useCallback((tracks: MusicTrack[], startIndex = 0) => {
+    ensureProfiles();
     setPlaylist(tracks);
     setCurrentIndex(startIndex);
     setAutoAdvance(true);
@@ -105,9 +114,10 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     setTimeout(() => {
       audioRef.current?.play().catch(() => {});
     }, 50);
-  }, []);
+  }, [ensureProfiles]);
 
   const playSingle = useCallback((track: MusicTrack) => {
+    ensureProfiles();
     setPlaylist([track]);
     setCurrentIndex(0);
     setAutoAdvance(false);
@@ -116,7 +126,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     setTimeout(() => {
       audioRef.current?.play().catch(() => {});
     }, 50);
-  }, []);
+  }, [ensureProfiles]);
 
   const pause = useCallback(() => {
     audioRef.current?.pause();
