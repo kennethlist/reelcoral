@@ -642,8 +642,6 @@ export default function Player() {
     if (idx === null) return;
     setSeekTarget(currentPosition());
     setAudioIdx(idx);
-    const track = info?.audio_tracks.find((t) => t.index === idx);
-    if (track) setPrefs({ preferred_audio_lang: track.lang });
   }
 
   function handleSubChange(idx: number | null) {
@@ -652,13 +650,6 @@ export default function Player() {
       setSeekTarget(currentPosition());
     }
     setSubIdx(idx);
-    if (idx !== null) {
-      // Persist preference only when selecting a track — deselecting subs
-      // shouldn't wipe out subtitles_enabled, since the user may just be
-      // watching a file that lacks their preferred language.
-      const track = info?.subtitle_tracks.find((t) => t.index === idx);
-      if (track) setPrefs({ subtitles_enabled: true, preferred_subtitle_lang: track.lang });
-    }
   }
 
   function handleSubModeChange(mode: "burn" | "external") {
