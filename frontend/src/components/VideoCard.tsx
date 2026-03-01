@@ -63,10 +63,10 @@ function NowPlayingIndicator() {
 }
 
 function CheckmarkIcon({ status }: { status: "opened" | "completed" }) {
-  const color = status === "completed" ? "text-green-400" : "text-gray-400";
+  const bg = status === "completed" ? "bg-green-600" : "bg-gray-600";
   return (
-    <div className={`absolute top-1 right-1 ${color} drop-shadow-lg z-[5]`}>
-      <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+    <div className={`absolute top-1 right-1 ${bg} rounded-full w-5 h-5 flex items-center justify-center z-[5] shadow-md`}>
+      <svg className="w-3 h-3 text-white" viewBox="0 0 24 24" fill="currentColor">
         <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41L9 16.17z" />
       </svg>
     </div>
