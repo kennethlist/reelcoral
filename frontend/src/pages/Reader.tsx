@@ -45,9 +45,19 @@ interface ReadPosition {
 
 let _positionSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const _positionMap: Record<string, ReadPosition> = {};
+const _POSITIONS_LS_KEY = "rc-read-positions";
+
+// Bootstrap from localStorage so positions survive page reload even if
+// the async server fetch hasn't returned yet.
+try {
+  const raw = localStorage.getItem(_POSITIONS_LS_KEY);
+  if (raw) Object.assign(_positionMap, JSON.parse(raw));
+} catch {}
 
 function savePosition(path: string, pos: ReadPosition) {
   _positionMap[path] = pos;
+  // Synchronous localStorage write — survives page reload immediately
+  try { localStorage.setItem(_POSITIONS_LS_KEY, JSON.stringify(_positionMap)); } catch {}
   // Debounced server save (every 5s)
   if (_positionSaveTimer) clearTimeout(_positionSaveTimer);
   _positionSaveTimer = setTimeout(() => {
@@ -61,6 +71,7 @@ function flushPositionSave(useSendBeacon = false) {
     _positionSaveTimer = null;
   }
   if (Object.keys(_positionMap).length > 0) {
+    try { localStorage.setItem(_POSITIONS_LS_KEY, JSON.stringify(_positionMap)); } catch {}
     if (useSendBeacon && navigator.sendBeacon) {
       navigator.sendBeacon(
         `/api/user/data/${encodeURIComponent("read_positions")}`,
@@ -328,10 +339,10 @@ function EpubReader({
   useEffect(() => {
     if (!info || settings.navMode !== "page") return;
     onPageInfo(currentPage + 1, fullyLoaded ? totalPages : 0);
-    // Update progress ref immediately (used for resize repositioning)
-    progressRef.current = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
-    // Debounce the localStorage write
+    // Only update progress and save after position has been restored to
+    // avoid clobbering the saved progress with 0 during initial loading.
     if (positionRestoredRef.current) {
+      progressRef.current = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         const progress = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
@@ -963,7 +974,11 @@ export default function Reader() {
   const settingsRef = useRef<HTMLDivElement>(null);
 
   const [settings, setSettings] = useState<ReaderSettings>(loadSettings);
-  const [initialPosition, setInitialPosition] = useState<ReadPosition | null | undefined>(undefined);
+  // Initialize from _positionMap (pre-populated from localStorage) so we
+  // don't have to wait for the async server fetch before rendering the reader.
+  const [initialPosition, setInitialPosition] = useState<ReadPosition | null | undefined>(
+    () => _positionMap[currentPath] || null
+  );
 
   // Apply server defaults for book font settings (only if user hasn't saved a preference)
   useEffect(() => {
