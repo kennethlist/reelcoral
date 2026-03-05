@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, BrowseEntry, setFileStatus, downloadUrl } from "../api";
+import { browse, BrowseEntry, setFileStatus, downloadUrl, compressedImageUrl } from "../api";
 
 function isTouchDevice() {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -21,13 +21,24 @@ function loadSetting<T>(key: string, valid: T[], fallback: T): T {
   return fallback;
 }
 
-function saveSetting(key: string, value: string) {
+function saveSetting(key: string, value: string | boolean) {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     const settings = raw ? JSON.parse(raw) : {};
     settings[key] = value;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
   } catch {}
+}
+
+function loadBoolSetting(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (raw) {
+      const val = JSON.parse(raw)[key];
+      if (typeof val === "boolean") return val;
+    }
+  } catch {}
+  return fallback;
 }
 
 export default function Gallery() {
@@ -45,6 +56,7 @@ export default function Gallery() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pageDirection, setPageDirection] = useState<PageDirection>(() => loadSetting("pageDirection", ["normal", "reverse", "horseshoe"], "normal"));
   const [pageFit, setPageFit] = useState<PageFit>(() => loadSetting("galleryFit", ["width", "height", "page"], "page"));
+  const [compressed, setCompressed] = useState(() => loadBoolSetting("galleryCompressed", true));
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -100,6 +112,22 @@ export default function Gallery() {
       setFileStatus(images[currentIndex].path, "completed").catch(() => {});
     }
   }, [currentIndex, images]);
+
+  // Preload adjacent images
+  useEffect(() => {
+    if (images.length === 0) return;
+    for (const offset of [-1, 1]) {
+      const idx = currentIndex + offset;
+      if (idx >= 0 && idx < images.length) {
+        const path = images[idx].path;
+        const url = compressed
+          ? compressedImageUrl(path)
+          : `/api/image?path=${encodeURIComponent(path)}`;
+        const img = new Image();
+        img.src = url;
+      }
+    }
+  }, [currentIndex, images, compressed]);
 
   const goTo = useCallback(
     (delta: number) => {
@@ -375,7 +403,7 @@ export default function Gallery() {
                   ))}
                 </div>
                 <label className="text-xs text-gray-400 mb-1 block">Page direction</label>
-                <div className="flex gap-1">
+                <div className="flex gap-1 mb-3">
                   {(["normal", "reverse", "horseshoe"] as const).map((dir) => (
                     <button
                       key={dir}
@@ -390,6 +418,15 @@ export default function Gallery() {
                     </button>
                   ))}
                 </div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={compressed}
+                    onChange={(e) => { setCompressed(e.target.checked); saveSetting("galleryCompressed", e.target.checked); }}
+                    className="accent-blue-600"
+                  />
+                  <span className="text-xs text-gray-300">Compressed images</span>
+                </label>
               </div>
             )}
           </div>
@@ -400,7 +437,7 @@ export default function Gallery() {
       {currentImage && (
         <div className={`absolute inset-0 flex ${pageFit === "width" ? "items-start overflow-y-auto" : "items-center"} justify-center`} style={{ paddingTop: "env(safe-area-inset-top)" }}>
           <img
-            src={`/api/image?path=${encodeURIComponent(currentImage.path)}`}
+            src={compressed ? compressedImageUrl(currentImage.path) : `/api/image?path=${encodeURIComponent(currentImage.path)}`}
             alt={currentImage.name}
             className={pageFit === "width" ? "w-full h-auto" : pageFit === "height" ? "h-full w-auto" : "w-full h-full object-contain"}
             draggable={false}

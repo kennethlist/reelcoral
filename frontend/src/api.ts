@@ -294,6 +294,11 @@ export async function fetchThumbnailBatch(paths: string[]): Promise<Record<strin
   return data.thumbnails ?? {};
 }
 
+// Compressed image API
+export function compressedImageUrl(path: string, maxWidth = 1920): string {
+  return `/api/image/compressed?path=${encodeURIComponent(path)}&maxWidth=${maxWidth}`;
+}
+
 // Download API
 export function downloadUrl(path: string): string {
   return `/api/download?path=${encodeURIComponent(path)}`;

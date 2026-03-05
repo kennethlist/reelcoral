@@ -35,7 +35,6 @@ function detectFormat(path: string): FileFormat {
 }
 
 // --- Reading Position Persistence ---
-const POSITION_KEY = "rc-read-position";
 
 interface ReadPosition {
   chapter?: number;
@@ -45,19 +44,15 @@ interface ReadPosition {
 }
 
 let _positionSaveTimer: ReturnType<typeof setTimeout> | null = null;
+const _positionMap: Record<string, ReadPosition> = {};
 
 function savePosition(path: string, pos: ReadPosition) {
-  try {
-    const raw = localStorage.getItem(POSITION_KEY);
-    const map = raw ? JSON.parse(raw) : {};
-    map[path] = pos;
-    localStorage.setItem(POSITION_KEY, JSON.stringify(map));
-    // Debounced server save (every 5s)
-    if (_positionSaveTimer) clearTimeout(_positionSaveTimer);
-    _positionSaveTimer = setTimeout(() => {
-      saveUserData("read_positions", map).catch(() => {});
-    }, 5000);
-  } catch {}
+  _positionMap[path] = pos;
+  // Debounced server save (every 5s)
+  if (_positionSaveTimer) clearTimeout(_positionSaveTimer);
+  _positionSaveTimer = setTimeout(() => {
+    saveUserData("read_positions", { ..._positionMap }).catch(() => {});
+  }, 5000);
 }
 
 function flushPositionSave() {
@@ -65,20 +60,8 @@ function flushPositionSave() {
     clearTimeout(_positionSaveTimer);
     _positionSaveTimer = null;
   }
-  try {
-    const raw = localStorage.getItem(POSITION_KEY);
-    if (raw) saveUserData("read_positions", JSON.parse(raw)).catch(() => {});
-  } catch {}
-}
-
-function getPosition(path: string): ReadPosition | null {
-  try {
-    const raw = localStorage.getItem(POSITION_KEY);
-    if (!raw) return null;
-    const map = JSON.parse(raw);
-    return map[path] || null;
-  } catch {
-    return null;
+  if (Object.keys(_positionMap).length > 0) {
+    saveUserData("read_positions", { ..._positionMap }).catch(() => {});
   }
 }
 
@@ -135,11 +118,13 @@ function EpubReader({
   settings,
   onPageInfo,
   controlsVisible,
+  initialPosition,
 }: {
   path: string;
   settings: ReaderSettings;
   onPageInfo: (current: number, total: number) => void;
   controlsVisible: boolean;
+  initialPosition: ReadPosition | null;
 }) {
   const [info, setInfo] = useState<EbookInfo | null>(null);
   const [html, setHtml] = useState("");
@@ -185,7 +170,7 @@ function EpubReader({
       if (cancelled) return;
       setInfo(data);
 
-      const saved = getPosition(path);
+      const saved = initialPosition;
       const count = data.chapter_count;
       const parts: string[] = new Array(count);
 
@@ -468,12 +453,14 @@ function ImagePageReader({
   settings,
   onPageInfo,
   controlsVisible,
+  initialPosition,
 }: {
   path: string;
   format: "pdf" | "cbr" | "cbz";
   settings: ReaderSettings;
   onPageInfo: (current: number, total: number) => void;
   controlsVisible: boolean;
+  initialPosition: ReadPosition | null;
 }) {
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
@@ -502,7 +489,7 @@ function ImagePageReader({
     const fetchInfo = format === "pdf" ? getPdfInfo(path) : getComicInfo(path);
     fetchInfo.then((data) => {
       setPageCount(data.page_count);
-      const saved = getPosition(path);
+      const saved = initialPosition;
       const startPage = saved?.page != null && saved.page < data.page_count ? saved.page : 0;
       setCurrentPage(startPage);
       onPageInfo(startPage + 1, data.page_count);
@@ -628,9 +615,11 @@ function ImagePageReader({
 function MarkdownReader({
   path,
   settings,
+  initialPosition,
 }: {
   path: string;
   settings: ReaderSettings;
+  initialPosition: ReadPosition | null;
 }) {
   const [html, setHtml] = useState("");
   const [loading, setLoading] = useState(true);
@@ -642,10 +631,9 @@ function MarkdownReader({
       setHtml(data.html);
       setLoading(false);
       // Restore scroll position
-      const saved = getPosition(path);
-      if (saved?.scrollY) {
+      if (initialPosition?.scrollY) {
         requestAnimationFrame(() => {
-          contentRef.current?.scrollTo({ top: saved.scrollY });
+          contentRef.current?.scrollTo({ top: initialPosition.scrollY });
         });
       }
     });
@@ -941,6 +929,7 @@ export default function Reader() {
   const settingsRef = useRef<HTMLDivElement>(null);
 
   const [settings, setSettings] = useState<ReaderSettings>(loadSettings);
+  const [initialPosition, setInitialPosition] = useState<ReadPosition | null | undefined>(undefined);
 
   // Apply server defaults for book font settings (only if user hasn't saved a preference)
   useEffect(() => {
@@ -957,7 +946,7 @@ export default function Reader() {
     }).catch(() => {});
   }, []);
 
-  // Fetch server-saved reader settings and positions on mount, merge with localStorage
+  // Fetch server-saved reader settings and positions on mount
   useEffect(() => {
     getUserData("reader_settings").then((serverSettings) => {
       if (serverSettings && Object.keys(serverSettings).length > 0) {
@@ -970,14 +959,14 @@ export default function Reader() {
     }).catch(() => {});
     getUserData("read_positions").then((serverPositions) => {
       if (serverPositions && Object.keys(serverPositions).length > 0) {
-        try {
-          const raw = localStorage.getItem(POSITION_KEY);
-          const local = raw ? JSON.parse(raw) : {};
-          const merged = { ...local, ...serverPositions };
-          localStorage.setItem(POSITION_KEY, JSON.stringify(merged));
-        } catch {}
+        Object.assign(_positionMap, serverPositions);
       }
-    }).catch(() => {});
+      setInitialPosition(
+        (serverPositions && serverPositions[currentPath]) || null
+      );
+    }).catch(() => {
+      setInitialPosition(null);
+    });
   }, []);
 
   // Flush position save on unmount
@@ -1246,34 +1235,43 @@ export default function Reader() {
 
       {/* Content area */}
       <div className="flex-1 flex flex-col pt-[env(safe-area-inset-top)] overflow-hidden">
-        {format === "epub" && (
-          <EpubReader
-            path={currentPath}
-            settings={settings}
-            onPageInfo={(c, t) => {
-              setPageInfo({ current: c, total: t });
-              if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
-            }}
-            controlsVisible={controlsVisible}
-          />
-        )}
-        {format === "md" && (
-          <MarkdownReader
-            path={currentPath}
-            settings={settings}
-          />
-        )}
-        {(format === "pdf" || format === "cbr" || format === "cbz") && (
-          <ImagePageReader
-            path={currentPath}
-            format={format}
-            settings={settings}
-            onPageInfo={(c, t) => {
-              setPageInfo({ current: c, total: t });
-              if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
-            }}
-            controlsVisible={controlsVisible}
-          />
+        {initialPosition === undefined ? (
+          <div className="flex-1 flex items-center justify-center text-zinc-500">Loading…</div>
+        ) : (
+          <>
+            {format === "epub" && (
+              <EpubReader
+                path={currentPath}
+                settings={settings}
+                onPageInfo={(c, t) => {
+                  setPageInfo({ current: c, total: t });
+                  if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
+                }}
+                controlsVisible={controlsVisible}
+                initialPosition={initialPosition}
+              />
+            )}
+            {format === "md" && (
+              <MarkdownReader
+                path={currentPath}
+                settings={settings}
+                initialPosition={initialPosition}
+              />
+            )}
+            {(format === "pdf" || format === "cbr" || format === "cbz") && (
+              <ImagePageReader
+                path={currentPath}
+                format={format}
+                settings={settings}
+                onPageInfo={(c, t) => {
+                  setPageInfo({ current: c, total: t });
+                  if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
+                }}
+                controlsVisible={controlsVisible}
+                initialPosition={initialPosition}
+              />
+            )}
+          </>
         )}
       </div>
 
