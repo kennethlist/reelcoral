@@ -451,6 +451,13 @@ export default function Gallery() {
         </div>
       </div>
 
+      {/* Loading spinner */}
+      {!showImage && (
+        <div className="absolute inset-0 z-[5] flex items-center justify-center">
+          <div className="w-10 h-10 border-4 border-white/20 border-t-white/80 rounded-full animate-spin" />
+        </div>
+      )}
+
       {/* Image area */}
       {currentImage && (
         <div ref={scrollRef} className={`absolute inset-0 flex ${pageFit === "width" ? "items-start overflow-y-auto" : "items-center"} justify-center`} style={{ paddingTop: "env(safe-area-inset-top)" }}>
