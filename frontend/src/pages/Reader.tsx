@@ -56,6 +56,7 @@ try {
 
 function savePosition(path: string, pos: ReadPosition) {
   _positionMap[path] = pos;
+  console.log("[EPUB save] path:", path, "pos:", JSON.stringify(pos));
   // Synchronous localStorage write — survives page reload immediately
   try { localStorage.setItem(_POSITIONS_LS_KEY, JSON.stringify(_positionMap)); } catch {}
   // Debounced server save (every 5s)
@@ -189,6 +190,7 @@ function EpubReader({
       setInfo(data);
 
       const saved = initialPosition;
+      console.log("[EPUB restore] initialPosition:", JSON.stringify(saved), "navMode:", settings.navMode, "path:", path);
       const count = data.chapter_count;
       const parts: string[] = new Array(count);
 
@@ -207,8 +209,10 @@ function EpubReader({
       setFullyLoaded(true);
 
       // Restore saved position
+      console.log("[EPUB restore] all chapters loaded, saved:", JSON.stringify(saved));
       if (saved?.progress != null) {
         progressRef.current = saved.progress;
+        console.log("[EPUB restore] set progressRef to", saved.progress);
       }
       if (settings.navMode === "scroll" && saved?.scrollY) {
         setLoading(false);
@@ -255,6 +259,7 @@ function EpubReader({
     setTotalPages(pages);
     // Restore position from progress fraction
     const newPage = Math.min(Math.round(progressRef.current * (pages - 1)), pages - 1);
+    console.log("[EPUB countPages] progressRef:", progressRef.current, "pages:", pages, "newPage:", newPage, "positionRestored:", positionRestoredRef.current);
     setCurrentPage(newPage);
     // Reveal content after first countPages post-restore positions correctly
     if (!contentReady && positionRestoredRef.current) {
@@ -977,7 +982,11 @@ export default function Reader() {
   // Initialize from _positionMap (pre-populated from localStorage) so we
   // don't have to wait for the async server fetch before rendering the reader.
   const [initialPosition, setInitialPosition] = useState<ReadPosition | null | undefined>(
-    () => _positionMap[currentPath] || null
+    () => {
+      const pos = _positionMap[currentPath] || null;
+      console.log("[EPUB init] currentPath:", currentPath, "positionMap keys:", Object.keys(_positionMap), "initialPosition:", JSON.stringify(pos));
+      return pos;
+    }
   );
 
   // Apply server defaults for book font settings (only if user hasn't saved a preference)
