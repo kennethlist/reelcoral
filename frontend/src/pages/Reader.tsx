@@ -189,6 +189,9 @@ function EpubReader({
       setFullyLoaded(true);
 
       // Restore saved position
+      if (saved?.progress != null) {
+        progressRef.current = saved.progress;
+      }
       if (settings.navMode === "scroll" && saved?.scrollY) {
         setLoading(false);
         requestAnimationFrame(() => {
@@ -196,7 +199,6 @@ function EpubReader({
           requestAnimationFrame(() => setContentReady(true));
         });
       } else if (settings.navMode === "page" && saved?.progress != null) {
-        progressRef.current = saved.progress;
         setLoading(false);
         // contentReady will be set after countPages runs
       } else {
@@ -333,11 +335,36 @@ function EpubReader({
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
   }, [currentPage, totalPages, settings.navMode, info]);
 
+  // Flush position on unmount so closing within the debounce window doesn't lose progress
+  useEffect(() => {
+    return () => {
+      if (!positionRestoredRef.current) return;
+      if (settings.navMode === "page") {
+        const progress = progressRef.current;
+        const chapter = info
+          ? Math.max(0, Math.min(Math.floor(progress * info.chapter_count), info.chapter_count - 1))
+          : 0;
+        savePosition(path, {
+          page: Math.round(progress * Math.max(1, totalPages - 1)),
+          progress,
+          chapter,
+        });
+      } else {
+        const y = contentRef.current?.scrollTop || 0;
+        savePosition(path, { scrollY: y });
+      }
+    };
+  }, [path, settings.navMode, totalPages, info]);
+
   // Save scroll position on scroll (scroll mode only)
   const handleScroll = useCallback(() => {
     if (settings.navMode !== "scroll") return;
-    const y = contentRef.current?.scrollTop || 0;
-    savePosition(path, { scrollY: y });
+    const el = contentRef.current;
+    if (!el) return;
+    const y = el.scrollTop;
+    const maxScroll = el.scrollHeight - el.clientHeight;
+    const progress = maxScroll > 0 ? y / maxScroll : 0;
+    savePosition(path, { scrollY: y, progress });
   }, [path, settings.navMode]);
 
   // Page-flip navigation
