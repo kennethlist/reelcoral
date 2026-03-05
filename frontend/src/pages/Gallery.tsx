@@ -60,8 +60,12 @@ export default function Gallery() {
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
   const currentIndexRef = useRef(currentIndex);
+  const [showImage, setShowImage] = useState(true);
+  const imageLoadedRef = useRef(false);
+  const blackScreenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
   // Load all media files from the parent directory,
@@ -112,6 +116,20 @@ export default function Gallery() {
       setFileStatus(images[currentIndex].path, "completed").catch(() => {});
     }
   }, [currentIndex, images]);
+
+  // Reset scroll position and start black-screen timer on image change
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    imageLoadedRef.current = false;
+    if (blackScreenTimer.current) clearTimeout(blackScreenTimer.current);
+    // After 300ms, if image hasn't loaded yet, hide old image (show black)
+    blackScreenTimer.current = setTimeout(() => {
+      if (!imageLoadedRef.current) setShowImage(false);
+    }, 300);
+    return () => {
+      if (blackScreenTimer.current) clearTimeout(blackScreenTimer.current);
+    };
+  }, [currentIndex, images, compressed]);
 
   // Preload adjacent images
   useEffect(() => {
@@ -279,10 +297,10 @@ export default function Gallery() {
   // Keyboard navigation
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "ArrowLeft") { goTo(pageDirection === "reverse" ? 1 : -1); }
-      else if (e.key === "ArrowRight") { goTo(pageDirection === "reverse" ? -1 : 1); }
-      else if (e.key === "ArrowUp") { goTo(pageDirection === "horseshoe" ? 1 : -1); }
-      else if (e.key === "ArrowDown") { goTo(pageDirection === "horseshoe" ? -1 : 1); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); goTo(pageDirection === "reverse" ? 1 : -1); }
+      else if (e.key === "ArrowRight") { e.preventDefault(); goTo(pageDirection === "reverse" ? -1 : 1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); goTo(pageDirection === "horseshoe" ? 1 : -1); }
+      else if (e.key === "ArrowDown") { e.preventDefault(); goTo(pageDirection === "horseshoe" ? -1 : 1); }
       else if (e.key === "Escape") goBack();
       else if (e.key === "f") toggleFullscreen();
     }
@@ -435,12 +453,18 @@ export default function Gallery() {
 
       {/* Image area */}
       {currentImage && (
-        <div className={`absolute inset-0 flex ${pageFit === "width" ? "items-start overflow-y-auto" : "items-center"} justify-center`} style={{ paddingTop: "env(safe-area-inset-top)" }}>
+        <div ref={scrollRef} className={`absolute inset-0 flex ${pageFit === "width" ? "items-start overflow-y-auto" : "items-center"} justify-center`} style={{ paddingTop: "env(safe-area-inset-top)" }}>
           <img
             src={compressed ? compressedImageUrl(currentImage.path) : `/api/image?path=${encodeURIComponent(currentImage.path)}`}
             alt={currentImage.name}
             className={pageFit === "width" ? "w-full h-auto" : pageFit === "height" ? "h-full w-auto" : "w-full h-full object-contain"}
+            style={showImage ? undefined : { visibility: "hidden" }}
             draggable={false}
+            onLoad={() => {
+              imageLoadedRef.current = true;
+              if (blackScreenTimer.current) clearTimeout(blackScreenTimer.current);
+              setShowImage(true);
+            }}
           />
         </div>
       )}
