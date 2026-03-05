@@ -30,7 +30,7 @@ def get_data(key):
     return jsonify(data)
 
 
-@userdata_bp.route("/data/<key>", methods=["PUT"])
+@userdata_bp.route("/data/<key>", methods=["PUT", "POST"])
 def save_data(key):
     if key not in ("read_positions", "reader_settings", "dir_sort"):
         return jsonify({"error": "invalid key"}), 400

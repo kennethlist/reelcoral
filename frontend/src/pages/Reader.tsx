@@ -55,13 +55,20 @@ function savePosition(path: string, pos: ReadPosition) {
   }, 5000);
 }
 
-function flushPositionSave() {
+function flushPositionSave(useSendBeacon = false) {
   if (_positionSaveTimer) {
     clearTimeout(_positionSaveTimer);
     _positionSaveTimer = null;
   }
   if (Object.keys(_positionMap).length > 0) {
-    saveUserData("read_positions", { ..._positionMap }).catch(() => {});
+    if (useSendBeacon && navigator.sendBeacon) {
+      navigator.sendBeacon(
+        `/api/user/data/${encodeURIComponent("read_positions")}`,
+        new Blob([JSON.stringify({ ..._positionMap })], { type: "application/json" })
+      );
+    } else {
+      saveUserData("read_positions", { ..._positionMap }).catch(() => {});
+    }
   }
 }
 
@@ -988,17 +995,23 @@ export default function Reader() {
       if (serverPositions && Object.keys(serverPositions).length > 0) {
         Object.assign(_positionMap, serverPositions);
       }
-      setInitialPosition(
-        (serverPositions && serverPositions[currentPath]) || null
-      );
+      // Use _positionMap (has both in-memory + server data) so positions
+      // survive SPA navigation even if the server save is still in-flight.
+      setInitialPosition(_positionMap[currentPath] || null);
     }).catch(() => {
-      setInitialPosition(null);
+      // Even if server fetch fails, check in-memory positions
+      setInitialPosition(_positionMap[currentPath] || null);
     });
   }, []);
 
-  // Flush position save on unmount
+  // Flush position save on unmount and tab close
   useEffect(() => {
-    return () => flushPositionSave();
+    const onBeforeUnload = () => flushPositionSave(true);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      flushPositionSave();
+    };
   }, []);
 
   const [pageInfo, setPageInfo] = useState({ current: 0, total: 0 });
