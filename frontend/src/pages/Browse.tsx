@@ -290,8 +290,6 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     setError("");
-    setThumbHashMap({});
-    setThumbGenerated(new Set());
     browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
       .then((result) => {
         setData(result);
@@ -311,6 +309,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           }
         }
         setThumbHashMap(filtered);
+        setThumbGenerated(new Set());
         // Fire off individual generation requests so thumbnails pop in one by one
         for (const path of uncached) {
           generateThumbnail(path).then((ok) => {
