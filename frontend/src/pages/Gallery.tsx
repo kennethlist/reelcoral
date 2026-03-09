@@ -56,8 +56,25 @@ export default function Gallery() {
   const currentIndexRef = useRef(currentIndex);
   const [showImage, setShowImage] = useState(true);
   const imageLoadedRef = useRef(false);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingStatusRef = useRef<string | null>(null);
   const blackScreenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+
+  // Flush pending file status on unmount so the last viewed image is still marked
+  useEffect(() => {
+    return () => {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+      const p = pendingStatusRef.current;
+      if (p) {
+        // Use sendBeacon so the request isn't cancelled by unmount
+        navigator.sendBeacon(
+          "/api/user/file-status",
+          new Blob([JSON.stringify({ path: p, status: "opened" })], { type: "application/json" })
+        );
+      }
+    };
+  }, []);
 
   // Load all media files from the parent directory,
   // respecting any active filters from the browse page
@@ -100,12 +117,22 @@ export default function Gallery() {
     if (img && img.path !== currentPath) {
       setSearchParams({ path: img.path }, { replace: true });
     }
-    // Mark current image as viewed
-    if (img) setFileStatus(img.path, "opened").catch(() => {});
-    // Auto-complete when viewing the last image
-    if (currentIndex === images.length - 1 && images.length > 0) {
-      setFileStatus(images[currentIndex].path, "completed").catch(() => {});
+    // Debounce setFileStatus so rapid navigation doesn't flood connections
+    if (img) {
+      pendingStatusRef.current = img.path;
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+      const isLast = currentIndex === images.length - 1;
+      statusTimerRef.current = setTimeout(() => {
+        const p = pendingStatusRef.current;
+        if (p) {
+          setFileStatus(p, isLast ? "completed" : "opened").catch(() => {});
+          pendingStatusRef.current = null;
+        }
+      }, 300);
     }
+    return () => {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    };
   }, [currentIndex, images]);
 
   // Reset scroll position and start black-screen timer on image change
@@ -122,9 +149,10 @@ export default function Gallery() {
     };
   }, [currentIndex, images, prefs.image_max_width]);
 
-  // Preload adjacent images
+  // Preload adjacent images (cancel old preloads on re-run/unmount)
   useEffect(() => {
     if (images.length === 0) return;
+    const preloads: HTMLImageElement[] = [];
     for (const offset of [-1, 1]) {
       const idx = currentIndex + offset;
       if (idx >= 0 && idx < images.length) {
@@ -134,8 +162,12 @@ export default function Gallery() {
           : mediaUrl(path);
         const img = new Image();
         img.src = url;
+        preloads.push(img);
       }
     }
+    return () => {
+      for (const img of preloads) img.src = "";
+    };
   }, [currentIndex, images, prefs.image_max_width]);
 
   const goTo = useCallback(
@@ -144,8 +176,6 @@ export default function Gallery() {
       const idx = currentIndexRef.current;
       const currentImage = images[idx];
       if (!currentImage) return;
-      // Mark current file as viewed before navigating away
-      setFileStatus(currentImage.path, "opened").catch(() => {});
       const allIdx = allFiles.findIndex((e) => e.path === currentImage.path);
       if (allIdx < 0) return;
       const nextAllIdx = allIdx + delta;
