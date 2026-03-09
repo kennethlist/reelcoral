@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { BrowseEntry } from "../api";
+import { useState, useRef } from "react";
+import { BrowseEntry, mediaUrl, thumbnailUrl } from "../api";
 
 interface Props {
   entry: BrowseEntry;
@@ -11,7 +11,8 @@ interface Props {
   musicMode?: boolean;
   coverArt?: string;
   isPlaying?: boolean;
-  thumbData?: string;
+  thumbHash?: string;
+  thumbReady?: boolean;
   fileStatus?: "opened" | "completed";
   onStatusChange?: (path: string, status: "opened" | "completed" | null) => void;
 }
@@ -73,33 +74,33 @@ function CheckmarkIcon({ status }: { status: "opened" | "completed" }) {
   );
 }
 
-export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, thumbVersion, generateOnFly = true, musicMode, coverArt, isPlaying, thumbData, fileStatus, onStatusChange }: Props) {
+export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, thumbVersion, generateOnFly = true, musicMode, coverArt, isPlaying, thumbHash, thumbReady, fileStatus, onStatusChange }: Props) {
   const [thumbFailed, setThumbFailed] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
 
-  const genParam = generateOnFly ? "" : "&generate=0";
+  // Reset failure state when thumbnail becomes ready (generated async)
+  const prevReady = useRef(thumbReady);
+  if (thumbReady && !prevReady.current) {
+    if (thumbFailed) setThumbFailed(false);
+  }
+  prevReady.current = thumbReady;
 
   // Determine thumbnail URL
   let thumbUrl: string | null = null;
   if (musicMode) {
     const art = entry.cover_art || coverArt;
     if (art) {
-      thumbUrl = `/api/image?path=${encodeURIComponent(art)}`;
+      thumbUrl = mediaUrl(art);
     }
-  } else if (entry.is_image) {
-    thumbUrl = `/api/image?path=${encodeURIComponent(entry.path)}`;
-  } else if (entry.name.toLowerCase().endsWith(".pdf")) {
-    thumbUrl = `/api/pdf/page?path=${encodeURIComponent(entry.path)}&page=0&fit=width&width=320&height=480`;
-  } else if (entry.is_ebook) {
-    thumbUrl = `/api/ebook/cover?path=${encodeURIComponent(entry.path)}`;
-  } else if (entry.is_comic) {
-    thumbUrl = `/api/comic/page?path=${encodeURIComponent(entry.path)}&page=0`;
   } else if (entry.is_markdown) {
     thumbUrl = null; // No server-side thumbnail for markdown
-  } else if (thumbData) {
-    thumbUrl = `data:image/jpeg;base64,${thumbData}`;
+  } else if (thumbHash && thumbReady) {
+    thumbUrl = thumbnailUrl(thumbHash, thumbVersion);
+  } else if (thumbVersion) {
+    // After thumbnail edit (picker), re-fetch via API since hash changed
+    thumbUrl = `/api/thumbnail?path=${encodeURIComponent(entry.path)}&v=${thumbVersion}`;
   } else {
-    thumbUrl = `/api/thumbnail?path=${encodeURIComponent(entry.path)}${thumbVersion ? `&v=${thumbVersion}` : ""}${genParam}`;
+    thumbUrl = null; // Still loading or generating
   }
 
   const isBookFormat = !musicMode && !entry.is_dir && (entry.is_ebook || entry.is_comic || entry.is_markdown || entry.name.toLowerCase().endsWith(".pdf"));

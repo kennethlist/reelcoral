@@ -93,12 +93,29 @@ def ebook_info():
     })
 
 
+def _resize_image_bytes(data, max_width, quality=85):
+    """Resize image bytes if wider than max_width. Returns resized bytes and format."""
+    from PIL import Image as PILImage
+    img = PILImage.open(BytesIO(data))
+    if img.width <= max_width:
+        return data, None  # No resize needed
+    ratio = max_width / img.width
+    new_size = (max_width, round(img.height * ratio))
+    img = img.resize(new_size, PILImage.LANCZOS)
+    buf = BytesIO()
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue(), "image/jpeg"
+
+
 @ebook_bp.route("/chapter")
 def ebook_chapter():
     config = current_app.config["MEDIA"]
     root = config["media"]["root"]
     path = request.args.get("path", "")
     index = int(request.args.get("index", 0))
+    max_width = request.args.get("maxWidth", 0, type=int)
     abs_path = _resolve_path(root, path)
     if not abs_path or not os.path.isfile(abs_path):
         return jsonify({"error": "not found"}), 404
@@ -146,6 +163,14 @@ def ebook_chapter():
             mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                         ".gif": "image/gif", ".svg": "image/svg+xml", ".webp": "image/webp"}
             mime = mime_map.get(ext, "image/png")
+            # Resize if max_width is set (skip SVG/GIF)
+            if max_width > 0 and ext not in (".svg", ".gif"):
+                try:
+                    resized, new_mime = _resize_image_bytes(content, max_width)
+                    if new_mime:
+                        content, mime = resized, new_mime
+                except Exception:
+                    pass
             b64 = base64.b64encode(content).decode("ascii")
             return f'src="data:{mime};base64,{b64}"'
         return match.group(0)

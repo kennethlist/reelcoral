@@ -12,10 +12,10 @@ CACHE_DIR = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
 COMIC_PAGE_CACHE_SUBDIR = "comic_pages"
 
 
-def _comic_cache_path(abs_path, page):
+def _comic_cache_path(abs_path, page, max_width=0):
     """Build a nested cache path for an extracted comic page, including file mtime for invalidation."""
     mtime = os.path.getmtime(abs_path)
-    key = f"{abs_path}|{page}|{mtime}"
+    key = f"{abs_path}|{page}|{mtime}|{max_width}"
     h = hashlib.sha256(key.encode()).hexdigest()
     cache_dir = os.path.join(CACHE_DIR, COMIC_PAGE_CACHE_SUBDIR, h[:2], h[2:4])
     return os.path.join(cache_dir, f"{h}")
@@ -82,12 +82,28 @@ def comic_info():
     return jsonify({"page_count": len(pages)})
 
 
+def _resize_image_data(data, max_width, quality=85):
+    """Resize image data if wider than max_width. Returns (data, mime)."""
+    from PIL import Image as PILImage
+    img = PILImage.open(BytesIO(data))
+    if img.width > max_width:
+        ratio = max_width / img.width
+        new_size = (max_width, round(img.height * ratio))
+        img = img.resize(new_size, PILImage.LANCZOS)
+    buf = BytesIO()
+    if img.mode in ("RGBA", "P"):
+        img = img.convert("RGB")
+    img.save(buf, format="JPEG", quality=quality)
+    return buf.getvalue()
+
+
 @comic_bp.route("/page")
 def comic_page():
     config = current_app.config["MEDIA"]
     root = config["media"]["root"]
     path = request.args.get("path", "")
     page = int(request.args.get("page", 0))
+    max_width = request.args.get("maxWidth", 0, type=int)
     abs_path = _resolve_path(root, path)
     if not abs_path or not os.path.isfile(abs_path):
         return jsonify({"error": "not found"}), 404
@@ -102,7 +118,23 @@ def comic_page():
                 ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp"}
     mime = mime_map.get(ext, "image/jpeg")
 
-    # Check disk cache first
+    # When resizing, always output JPEG
+    if max_width > 0:
+        cached = _comic_cache_path(abs_path, page, max_width) + ".jpg"
+        if os.path.exists(cached):
+            return send_file(cached, mimetype="image/jpeg")
+
+        data = _read_comic_page(abs_path, page_name)
+        if data is None:
+            return jsonify({"error": "failed to read page"}), 500
+
+        data = _resize_image_data(data, max_width)
+        os.makedirs(os.path.dirname(cached), exist_ok=True)
+        with open(cached, "wb") as f:
+            f.write(data)
+        return send_file(BytesIO(data), mimetype="image/jpeg")
+
+    # No resize — serve original
     cached = _comic_cache_path(abs_path, page) + ext
     if os.path.exists(cached):
         return send_file(cached, mimetype=mime)
@@ -111,7 +143,6 @@ def comic_page():
     if data is None:
         return jsonify({"error": "failed to read page"}), 500
 
-    # Write to disk cache
     os.makedirs(os.path.dirname(cached), exist_ok=True)
     with open(cached, "wb") as f:
         f.write(data)

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, BrowseEntry, setFileStatus, downloadUrl, compressedImageUrl } from "../api";
+import { browse, BrowseEntry, setFileStatus, downloadUrl, compressedImageUrl, mediaUrl } from "../api";
+import { usePreferences } from "../hooks/usePreferences";
 
 function isTouchDevice() {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -30,17 +31,6 @@ function saveSetting(key: string, value: string | boolean) {
   } catch {}
 }
 
-function loadBoolSetting(key: string, fallback: boolean): boolean {
-  try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) {
-      const val = JSON.parse(raw)[key];
-      if (typeof val === "boolean") return val;
-    }
-  } catch {}
-  return fallback;
-}
-
 export default function Gallery() {
   const [searchParams, setSearchParams] = useSearchParams();
   const nav = useNavigate();
@@ -56,7 +46,8 @@ export default function Gallery() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pageDirection, setPageDirection] = useState<PageDirection>(() => loadSetting("pageDirection", ["normal", "reverse", "horseshoe"], "normal"));
   const [pageFit, setPageFit] = useState<PageFit>(() => loadSetting("galleryFit", ["width", "height", "page"], "page"));
-  const [compressed, setCompressed] = useState(() => loadBoolSetting("galleryCompressed", true));
+  const { prefs, setPrefs } = usePreferences();
+  const compressed = prefs.image_max_width > 0;
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -129,7 +120,7 @@ export default function Gallery() {
     return () => {
       if (blackScreenTimer.current) clearTimeout(blackScreenTimer.current);
     };
-  }, [currentIndex, images, compressed]);
+  }, [currentIndex, images, prefs.image_max_width]);
 
   // Preload adjacent images
   useEffect(() => {
@@ -139,13 +130,13 @@ export default function Gallery() {
       if (idx >= 0 && idx < images.length) {
         const path = images[idx].path;
         const url = compressed
-          ? compressedImageUrl(path)
-          : `/api/image?path=${encodeURIComponent(path)}`;
+          ? compressedImageUrl(path, prefs.image_max_width)
+          : mediaUrl(path);
         const img = new Image();
         img.src = url;
       }
     }
-  }, [currentIndex, images, compressed]);
+  }, [currentIndex, images, prefs.image_max_width]);
 
   const goTo = useCallback(
     (delta: number) => {
@@ -436,15 +427,20 @@ export default function Gallery() {
                     </button>
                   ))}
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={compressed}
-                    onChange={(e) => { setCompressed(e.target.checked); saveSetting("galleryCompressed", e.target.checked); }}
-                    className="accent-blue-600"
-                  />
-                  <span className="text-xs text-gray-300">Compressed images</span>
-                </label>
+                <label className="text-xs text-gray-400 mb-1 block">Image quality</label>
+                <select
+                  value={prefs.image_max_width}
+                  onChange={(e) => setPrefs({ image_max_width: Number(e.target.value) })}
+                  className="w-full bg-gray-700 text-gray-200 text-xs rounded px-2 py-1.5 cursor-pointer"
+                >
+                  <option value={0}>Original</option>
+                  <option value={426}>240p (426px)</option>
+                  <option value={640}>360p (640px)</option>
+                  <option value={854}>480p (854px)</option>
+                  <option value={1280}>720p (1280px)</option>
+                  <option value={1920}>1080p (1920px)</option>
+                  <option value={2560}>1440p (2560px)</option>
+                </select>
               </div>
             )}
           </div>
@@ -462,7 +458,7 @@ export default function Gallery() {
       {currentImage && (
         <div ref={scrollRef} className={`absolute inset-0 flex ${pageFit === "width" ? "items-start overflow-y-auto" : "items-center"} justify-center`} style={{ paddingTop: "env(safe-area-inset-top)" }}>
           <img
-            src={compressed ? compressedImageUrl(currentImage.path) : `/api/image?path=${encodeURIComponent(currentImage.path)}`}
+            src={compressed ? compressedImageUrl(currentImage.path, prefs.image_max_width) : mediaUrl(currentImage.path)}
             alt={currentImage.name}
             className={pageFit === "width" ? "w-full h-auto" : pageFit === "height" ? "h-full w-auto" : "w-full h-full object-contain"}
             style={showImage ? undefined : { visibility: "hidden" }}

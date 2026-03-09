@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMusicPlayer } from "../hooks/useMusicPlayer";
+import { mediaUrl } from "../api";
 
 function formatTime(s: number): string {
   if (!isFinite(s) || s < 0) return "0:00";
@@ -67,7 +68,7 @@ export default function MusicBar() {
   }
 
   const coverUrl = track.coverArt
-    ? `/api/image?path=${encodeURIComponent(track.coverArt)}`
+    ? mediaUrl(track.coverArt)
     : null;
 
   return (

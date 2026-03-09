@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from "react";
-import { audioUrl, getConfig, saveUserPreferences } from "../api";
+import { audioUrl, getConfig, saveUserPreferences, mediaUrl } from "../api";
 
 export interface MusicTrack {
   name: string;
@@ -197,7 +197,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
     const trackName = currentTrack.name.replace(/\.[^/.]+$/, "");
     const artworkList: MediaImage[] = currentTrack.coverArt
-      ? [{ src: `/api/image?path=${encodeURIComponent(currentTrack.coverArt)}`, sizes: "512x512", type: "image/jpeg" }]
+      ? [{ src: mediaUrl(currentTrack.coverArt), sizes: "512x512", type: "image/jpeg" }]
       : [];
 
     navigator.mediaSession.metadata = new MediaMetadata({

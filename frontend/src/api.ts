@@ -233,8 +233,10 @@ export async function getEbookInfo(path: string): Promise<EbookInfo> {
   return res.json();
 }
 
-export async function getEbookChapter(path: string, index: number): Promise<{ html: string; index: number }> {
-  const res = await fetch(`/api/ebook/chapter?path=${encodeURIComponent(path)}&index=${index}`);
+export async function getEbookChapter(path: string, index: number, maxWidth = 0): Promise<{ html: string; index: number }> {
+  let url = `/api/ebook/chapter?path=${encodeURIComponent(path)}&index=${index}`;
+  if (maxWidth > 0) url += `&maxWidth=${maxWidth}`;
+  const res = await fetch(url);
   if (!res.ok) throw new Error("Ebook chapter failed");
   return res.json();
 }
@@ -254,8 +256,9 @@ export async function getComicInfo(path: string): Promise<ComicInfo> {
   return res.json();
 }
 
-export function comicPageUrl(path: string, page: number): string {
-  return `/api/comic/page?path=${encodeURIComponent(path)}&page=${page}`;
+export function comicPageUrl(path: string, page: number, maxWidth = 0): string {
+  const base = `/api/comic/page?path=${encodeURIComponent(path)}&page=${page}`;
+  return maxWidth > 0 ? `${base}&maxWidth=${maxWidth}` : base;
 }
 
 // PDF API
@@ -283,7 +286,9 @@ export async function getMarkdownContent(path: string): Promise<{ html: string }
 }
 
 // Batch thumbnails API
-export async function fetchThumbnailBatch(paths: string[]): Promise<Record<string, string | null>> {
+export interface ThumbnailInfo { hash: string; cached: boolean; }
+
+export async function fetchThumbnailBatch(paths: string[]): Promise<Record<string, ThumbnailInfo | null>> {
   const res = await fetch("/api/thumbnails/batch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -292,6 +297,29 @@ export async function fetchThumbnailBatch(paths: string[]): Promise<Record<strin
   if (!res.ok) return {};
   const data = await res.json();
   return data.thumbnails ?? {};
+}
+
+// Direct nginx URL from hash
+export function thumbnailUrl(hash: string, version?: number): string {
+  const base = `/thumbnails/${hash.slice(0, 2)}/${hash.slice(2, 4)}/${hash}.jpg`;
+  return version ? `${base}?v=${version}` : base;
+}
+
+// Trigger generation of a single missing thumbnail
+export async function generateThumbnail(path: string): Promise<boolean> {
+  const res = await fetch("/api/thumbnails/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths: [path] }),
+  });
+  if (!res.ok) return false;
+  const data = await res.json();
+  return (data.generated ?? []).length > 0;
+}
+
+// Direct media file URL (served by nginx, bypasses Flask)
+export function mediaUrl(path: string): string {
+  return `/media/${path.replace(/^\//, "").split("/").map(encodeURIComponent).join("/")}`;
 }
 
 // Compressed image API

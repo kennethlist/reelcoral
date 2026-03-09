@@ -199,11 +199,89 @@ def _generate_comic_thumbnail(comic_path, cache_path):
             os.remove(tmp_path)
 
 
+def _resolve_thumb_target(root, real_root, path, extensions):
+    """Resolve a browse path to its thumbnail target.
+
+    Returns (target_filepath, path_hash, is_image, is_book) or None if invalid.
+    """
+    if not isinstance(path, str):
+        return None
+
+    filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))
+    if not filepath.startswith(real_root):
+        return None
+
+    is_image = False
+    is_book = False
+    target = filepath
+
+    if os.path.isdir(filepath):
+        media_file, is_image = _find_first_media(filepath, extensions)
+        if not media_file:
+            media_file = next(_find_books(filepath), None)
+            if not media_file:
+                return None
+            is_book = True
+        else:
+            ext = os.path.splitext(media_file)[1].lower()
+            is_book = ext in BOOK_EXTS
+        target = media_file
+    elif os.path.isfile(filepath):
+        ext = os.path.splitext(filepath)[1].lower()
+        is_image = ext in IMAGE_EXTS
+        is_book = ext in BOOK_EXTS
+    else:
+        return None
+
+    path_hash = hashlib.sha256(target.encode()).hexdigest()
+    return target, path_hash, is_image, is_book
+
+
+def _migrate_legacy(path_hash):
+    """Migrate legacy flat cache file to nested location. Returns the nested cache path."""
+    cp = cache_path_for(path_hash)
+    legacy_path = os.path.join(CACHE_DIR, f"{path_hash}.jpg")
+    if not os.path.exists(cp) and os.path.exists(legacy_path):
+        os.makedirs(os.path.dirname(cp), exist_ok=True)
+        os.rename(legacy_path, cp)
+    return cp
+
+
+def _generate_thumbnail(filepath, cache_path, is_image, is_book, extensions):
+    """Generate a thumbnail for a media file. Returns True on success."""
+    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+
+    if is_book:
+        return _generate_book_thumbnail(filepath, cache_path)
+
+    if is_image:
+        cmd = [
+            "ffmpeg", "-i", filepath,
+            "-vf", "scale=320:-1",
+            "-frames:v", "1",
+            "-y", cache_path
+        ]
+    else:
+        data = ffprobe(filepath)
+        duration = float(data.get("format", {}).get("duration", 0)) if data else 0
+        seek = max(0, duration * 0.1)
+        cmd = [
+            "ffmpeg", "-ss", str(seek), "-i", filepath,
+            "-vf", "thumbnail=300,scale=320:-1",
+            "-frames:v", "1",
+            "-y", cache_path
+        ]
+
+    result = subprocess.run(cmd, capture_output=True, timeout=30)
+    return result.returncode == 0 and os.path.exists(cache_path)
+
+
 @thumbnail_bp.route("/thumbnails/batch", methods=["POST"])
 def thumbnails_batch():
     config = current_app.config["MEDIA"]
     root = config["media"]["root"]
     real_root = os.path.realpath(root)
+    extensions = set(config["media"].get("extensions", []))
 
     body = request.get_json(silent=True) or {}
     paths = body.get("paths", [])
@@ -217,75 +295,72 @@ def thumbnails_batch():
         with open(overrides_file) as f:
             overrides = json.load(f)
 
-    import base64
     thumbnails = {}
     for path in paths:
-        if not isinstance(path, str):
-            continue
-
-        filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))
-        if not filepath.startswith(real_root):
-            thumbnails[path] = None
-            continue
-
-        # Check override
+        # Check override first
         override_hash = overrides.get(path)
         if override_hash:
             override_cache = cache_path_for(override_hash)
             if os.path.exists(override_cache):
-                try:
-                    with open(override_cache, "rb") as f:
-                        thumbnails[path] = base64.b64encode(f.read()).decode("ascii")
-                    continue
-                except OSError:
-                    pass
-
-        # Resolve actual media file for directories
-        target = filepath
-        if os.path.isdir(filepath):
-            extensions = set(config["media"].get("extensions", []))
-            media_file, _ = _find_first_media(filepath, extensions)
-            if not media_file:
-                media_file = next(_find_books(filepath), None)
-            if not media_file:
-                thumbnails[path] = None
+                thumbnails[path] = {"hash": override_hash, "cached": True}
                 continue
-            target = media_file
-        elif not os.path.isfile(filepath):
+
+        resolved = _resolve_thumb_target(root, real_root, path, extensions)
+        if not resolved:
             thumbnails[path] = None
             continue
 
-        path_hash = hashlib.sha256(target.encode()).hexdigest()
-        cache_path = cache_path_for(path_hash)
-        legacy_path = os.path.join(CACHE_DIR, f"{path_hash}.jpg")
-
-        # Migrate legacy
-        if not os.path.exists(cache_path) and os.path.exists(legacy_path):
-            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-            os.rename(legacy_path, cache_path)
-
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path, "rb") as f:
-                    thumbnails[path] = base64.b64encode(f.read()).decode("ascii")
-            except OSError:
-                thumbnails[path] = None
-        else:
-            thumbnails[path] = None
+        _target, path_hash, _is_image, _is_book = resolved
+        cp = _migrate_legacy(path_hash)
+        cached = os.path.exists(cp)
+        thumbnails[path] = {"hash": path_hash, "cached": cached}
 
     return jsonify({"thumbnails": thumbnails})
+
+
+@thumbnail_bp.route("/thumbnails/generate", methods=["POST"])
+def thumbnails_generate():
+    config = current_app.config["MEDIA"]
+    root = config["media"]["root"]
+    real_root = os.path.realpath(root)
+    extensions = set(config["media"].get("extensions", []))
+
+    generate_on_fly = config.get("thumbnails", {}).get("generate_on_fly", True)
+    if not generate_on_fly:
+        return jsonify({"generated": []})
+
+    body = request.get_json(silent=True) or {}
+    paths = body.get("paths", [])
+    if not isinstance(paths, list) or len(paths) > 50:
+        return jsonify({"error": "invalid paths"}), 400
+
+    generated = []
+    for path in paths:
+        resolved = _resolve_thumb_target(root, real_root, path, extensions)
+        if not resolved:
+            continue
+
+        target, path_hash, is_image, is_book = resolved
+        cp = _migrate_legacy(path_hash)
+        if os.path.exists(cp):
+            continue
+
+        try:
+            if _generate_thumbnail(target, cp, is_image, is_book, extensions):
+                generated.append(path)
+        except Exception as e:
+            log.warning("Thumbnail generation failed for %s: %s", path, e)
+
+    return jsonify({"generated": generated})
 
 
 @thumbnail_bp.route("/thumbnail")
 def thumbnail():
     config = current_app.config["MEDIA"]
     root = config["media"]["root"]
+    real_root = os.path.realpath(root)
     extensions = set(config["media"].get("extensions", []))
     path = request.args.get("path", "")
-
-    filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))
-    if not filepath.startswith(os.path.realpath(root)):
-        return jsonify({"error": "forbidden"}), 403
 
     # Check for a thumbnail override (keyed by browse path, not media file)
     overrides_file = os.path.join(os.path.dirname(CACHE_DIR), "thumbnail_overrides.json")
@@ -298,39 +373,12 @@ def thumbnail():
             if os.path.exists(override_cache):
                 return send_file(override_cache, mimetype="image/jpeg", max_age=86400)
 
-    # For directories, find the first video or image file recursively
-    is_image = False
-    is_book = False
-    is_dir = os.path.isdir(filepath)
-    dir_for_books = filepath if is_dir else None
-    if is_dir:
-        media_file, is_image = _find_first_media(filepath, extensions)
-        if not media_file:
-            # Fall back to first book file
-            media_file = next(_find_books(filepath), None)
-            if not media_file:
-                return jsonify({"error": "no media found"}), 404
-            is_book = True
-        else:
-            # _find_first_media may return a book file since books are in extensions
-            ext = os.path.splitext(media_file)[1].lower()
-            is_book = ext in BOOK_EXTS
-        filepath = media_file
-    elif not os.path.isfile(filepath):
+    resolved = _resolve_thumb_target(root, real_root, path, extensions)
+    if not resolved:
         return jsonify({"error": "not found"}), 404
-    else:
-        ext = os.path.splitext(filepath)[1].lower()
-        is_book = ext in BOOK_EXTS
 
-    # Check cache (nested path, with fallback to legacy flat path)
-    path_hash = hashlib.sha256(filepath.encode()).hexdigest()
-    cache_path = cache_path_for(path_hash)
-    legacy_path = os.path.join(CACHE_DIR, f"{path_hash}.jpg")
-
-    # Migrate legacy flat file to nested location
-    if not os.path.exists(cache_path) and os.path.exists(legacy_path):
-        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-        os.rename(legacy_path, cache_path)
+    filepath, path_hash, is_image, is_book = resolved
+    cache_path = _migrate_legacy(path_hash)
 
     if os.path.exists(cache_path):
         return send_file(cache_path, mimetype="image/jpeg", max_age=86400)
@@ -340,47 +388,10 @@ def thumbnail():
     if not generate_on_fly:
         return jsonify({"error": "no thumbnail cached"}), 404
 
-    os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+    try:
+        if _generate_thumbnail(filepath, cache_path, is_image, is_book, extensions):
+            return send_file(cache_path, mimetype="image/jpeg", max_age=86400)
+    except Exception as e:
+        log.warning("Thumbnail generation failed for %s: %s", path, e)
 
-    if is_book:
-        ok = _generate_book_thumbnail(filepath, cache_path)
-        if not ok and dir_for_books:
-            # First book failed; try remaining books in the directory
-            for alt_book in _find_books(dir_for_books):
-                if alt_book == filepath:
-                    continue
-                alt_hash = hashlib.sha256(alt_book.encode()).hexdigest()
-                alt_cache = cache_path_for(alt_hash)
-                os.makedirs(os.path.dirname(alt_cache), exist_ok=True)
-                if _generate_book_thumbnail(alt_book, cache_path):
-                    ok = True
-                    break
-        if not ok:
-            return jsonify({"error": "thumbnail generation failed"}), 500
-        return send_file(cache_path, mimetype="image/jpeg", max_age=86400)
-
-    if is_image:
-        # Resize image to thumbnail using FFmpeg
-        cmd = [
-            "ffmpeg", "-i", filepath,
-            "-vf", "scale=320:-1",
-            "-frames:v", "1",
-            "-y", cache_path
-        ]
-    else:
-        # Get duration for seek position
-        data = ffprobe(filepath)
-        duration = float(data.get("format", {}).get("duration", 0)) if data else 0
-        seek = max(0, duration * 0.1)
-        cmd = [
-            "ffmpeg", "-ss", str(seek), "-i", filepath,
-            "-vf", "thumbnail=300,scale=320:-1",
-            "-frames:v", "1",
-            "-y", cache_path
-        ]
-
-    result = subprocess.run(cmd, capture_output=True, timeout=30)
-    if result.returncode != 0 or not os.path.exists(cache_path):
-        return jsonify({"error": "thumbnail generation failed"}), 500
-
-    return send_file(cache_path, mimetype="image/jpeg", max_age=86400)
+    return jsonify({"error": "thumbnail generation failed"}), 500

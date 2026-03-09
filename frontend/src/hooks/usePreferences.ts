@@ -13,6 +13,7 @@ export interface Preferences {
   thumbnail_candidates: 3 | 6 | 9;
   grid_size: "small" | "large";
   page_size: number;
+  image_max_width: number;
   music_volume?: number;
   music_profile?: string;
 }
@@ -29,6 +30,7 @@ const hardcodedDefaults: Preferences = {
   thumbnail_candidates: 3,
   grid_size: "small",
   page_size: 12,
+  image_max_width: 0,
 };
 
 function load(defaults: Preferences): Preferences {
@@ -56,6 +58,7 @@ export function usePreferences() {
           thumbnail_candidates: (cfg.defaults.thumbnail_candidates || 3) as 3 | 6 | 9,
           grid_size: (cfg.defaults.grid_size || "small") as "small" | "large",
           page_size: cfg.defaults.page_size || 12,
+          image_max_width: 0,
         };
         // Load from localStorage over server defaults
         const localPrefs = load(serverDefaults);

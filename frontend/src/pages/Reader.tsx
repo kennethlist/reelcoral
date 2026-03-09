@@ -17,6 +17,7 @@ import {
   saveUserData,
   setFileStatus,
 } from "../api";
+import { usePreferences } from "../hooks/usePreferences";
 
 function isTouchDevice() {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -56,7 +57,6 @@ try {
 
 function savePosition(path: string, pos: ReadPosition) {
   _positionMap[path] = pos;
-  console.log("[EPUB save] path:", path, "pos:", JSON.stringify(pos));
   // Synchronous localStorage write — survives page reload immediately
   try { localStorage.setItem(_POSITIONS_LS_KEY, JSON.stringify(_positionMap)); } catch {}
   // Debounced server save (every 5s)
@@ -135,12 +135,14 @@ function persistSettings(s: ReaderSettings) {
 function EpubReader({
   path,
   settings,
+  imageMaxWidth,
   onPageInfo,
   controlsVisible,
   initialPosition,
 }: {
   path: string;
   settings: ReaderSettings;
+  imageMaxWidth: number;
   onPageInfo: (current: number, total: number) => void;
   controlsVisible: boolean;
   initialPosition: ReadPosition | null;
@@ -190,14 +192,13 @@ function EpubReader({
       setInfo(data);
 
       const saved = initialPosition;
-      console.log("[EPUB restore] initialPosition:", JSON.stringify(saved), "navMode:", settings.navMode, "path:", path);
       const count = data.chapter_count;
       const parts: string[] = new Array(count);
 
       for (let i = 0; i < count; i++) {
         if (cancelled) return;
         setLoadProgress(`Loading chapter ${i + 1} / ${count}...`);
-        const chapter = await getEbookChapter(path, i);
+        const chapter = await getEbookChapter(path, i, imageMaxWidth);
         if (cancelled) return;
         parts[i] = chapter.html;
       }
@@ -209,10 +210,8 @@ function EpubReader({
       setFullyLoaded(true);
 
       // Restore saved position
-      console.log("[EPUB restore] all chapters loaded, saved:", JSON.stringify(saved));
       if (saved?.progress != null) {
         progressRef.current = saved.progress;
-        console.log("[EPUB restore] set progressRef to", saved.progress);
       }
       if (settings.navMode === "scroll" && saved?.scrollY) {
         setLoading(false);
@@ -259,7 +258,6 @@ function EpubReader({
     setTotalPages(pages);
     // Restore position from progress fraction
     const newPage = Math.min(Math.round(progressRef.current * (pages - 1)), pages - 1);
-    console.log("[EPUB countPages] progressRef:", progressRef.current, "pages:", pages, "newPage:", newPage, "positionRestored:", positionRestoredRef.current);
     setCurrentPage(newPage);
     // Reveal content after first countPages post-restore positions correctly
     if (!contentReady && positionRestoredRef.current) {
@@ -501,6 +499,7 @@ function ImagePageReader({
   path,
   format,
   settings,
+  imageMaxWidth,
   onPageInfo,
   controlsVisible,
   initialPosition,
@@ -508,6 +507,7 @@ function ImagePageReader({
   path: string;
   format: "pdf" | "cbr" | "cbz";
   settings: ReaderSettings;
+  imageMaxWidth: number;
   onPageInfo: (current: number, total: number) => void;
   controlsVisible: boolean;
   initialPosition: ReadPosition | null;
@@ -588,10 +588,13 @@ function ImagePageReader({
   const imageUrl = useMemo(() => {
     if (format === "pdf") {
       const dpr = window.devicePixelRatio || 1;
-      return pdfPageUrl(path, currentPage, settings.pdfFit, Math.round(containerSize.width * dpr), Math.round(containerSize.height * dpr));
+      let w = Math.round(containerSize.width * dpr);
+      let h = Math.round(containerSize.height * dpr);
+      if (imageMaxWidth > 0) { w = Math.min(w, imageMaxWidth); h = Math.min(h, imageMaxWidth); }
+      return pdfPageUrl(path, currentPage, settings.pdfFit, w, h);
     }
-    return comicPageUrl(path, currentPage);
-  }, [path, currentPage, format, settings.pdfFit, containerSize]);
+    return comicPageUrl(path, currentPage, imageMaxWidth);
+  }, [path, currentPage, format, settings.pdfFit, containerSize, imageMaxWidth]);
 
   // Preload nearby pages (prev 1, next 4)
   useEffect(() => {
@@ -601,9 +604,12 @@ function ImagePageReader({
         const img = new Image();
         if (format === "pdf") {
           const dpr = window.devicePixelRatio || 1;
-          img.src = pdfPageUrl(path, p, settings.pdfFit, Math.round(containerSize.width * dpr), Math.round(containerSize.height * dpr));
+          let w = Math.round(containerSize.width * dpr);
+          let h = Math.round(containerSize.height * dpr);
+          if (imageMaxWidth > 0) { w = Math.min(w, imageMaxWidth); h = Math.min(h, imageMaxWidth); }
+          img.src = pdfPageUrl(path, p, settings.pdfFit, w, h);
         } else {
-          img.src = comicPageUrl(path, p);
+          img.src = comicPageUrl(path, p, imageMaxWidth);
         }
       }
     }
@@ -622,8 +628,8 @@ function ImagePageReader({
               key={i}
               src={
                 format === "pdf"
-                  ? pdfPageUrl(path, i, settings.pdfFit, Math.round(containerSize.width * (window.devicePixelRatio || 1)), Math.round(containerSize.height * (window.devicePixelRatio || 1)))
-                  : comicPageUrl(path, i)
+                  ? pdfPageUrl(path, i, settings.pdfFit, Math.min(Math.round(containerSize.width * (window.devicePixelRatio || 1)), imageMaxWidth || Infinity), Math.min(Math.round(containerSize.height * (window.devicePixelRatio || 1)), imageMaxWidth || Infinity))
+                  : comicPageUrl(path, i, imageMaxWidth)
               }
               alt={`Page ${i + 1}`}
               className="max-w-full"
@@ -748,11 +754,15 @@ function SettingsPanel({
   settings,
   onChange,
   onClose,
+  imageMaxWidth,
+  onImageMaxWidthChange,
 }: {
   format: FileFormat;
   settings: ReaderSettings;
   onChange: (s: ReaderSettings) => void;
   onClose: () => void;
+  imageMaxWidth: number;
+  onImageMaxWidthChange: (v: number) => void;
 }) {
   const update = (partial: Partial<ReaderSettings>) => {
     const next = { ...settings, ...partial };
@@ -951,6 +961,26 @@ function SettingsPanel({
             </div>
           </div>
         )}
+
+        {/* Image quality — all formats except markdown */}
+        {format !== "md" && (
+          <div>
+            <label className="text-xs text-gray-400 mb-1 block">Image quality</label>
+            <select
+              value={imageMaxWidth}
+              onChange={(e) => onImageMaxWidthChange(Number(e.target.value))}
+              className="w-full bg-gray-800 text-gray-200 text-sm rounded px-3 py-1.5 border border-gray-700 cursor-pointer"
+            >
+              <option value={0}>Original</option>
+              <option value={426}>240p (426px)</option>
+              <option value={640}>360p (640px)</option>
+              <option value={854}>480p (854px)</option>
+              <option value={1280}>720p (1280px)</option>
+              <option value={1920}>1080p (1920px)</option>
+              <option value={2560}>1440p (2560px)</option>
+            </select>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -978,15 +1008,12 @@ export default function Reader() {
   const containerRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
 
+  const { prefs, setPrefs } = usePreferences();
   const [settings, setSettings] = useState<ReaderSettings>(loadSettings);
   // Initialize from _positionMap (pre-populated from localStorage) so we
   // don't have to wait for the async server fetch before rendering the reader.
   const [initialPosition, setInitialPosition] = useState<ReadPosition | null | undefined>(
-    () => {
-      const pos = _positionMap[currentPath] || null;
-      console.log("[EPUB init] currentPath:", currentPath, "positionMap keys:", Object.keys(_positionMap), "initialPosition:", JSON.stringify(pos));
-      return pos;
-    }
+    () => _positionMap[currentPath] || null
   );
 
   // Apply server defaults for book font settings (only if user hasn't saved a preference)
@@ -1291,6 +1318,8 @@ export default function Reader() {
                 settings={settings}
                 onChange={setSettings}
                 onClose={() => setSettingsOpen(false)}
+                imageMaxWidth={prefs.image_max_width}
+                onImageMaxWidthChange={(v) => setPrefs({ image_max_width: v })}
               />
             )}
           </div>
@@ -1307,6 +1336,7 @@ export default function Reader() {
               <EpubReader
                 path={currentPath}
                 settings={settings}
+                imageMaxWidth={prefs.image_max_width}
                 onPageInfo={(c, t) => {
                   setPageInfo({ current: c, total: t });
                   if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
@@ -1327,6 +1357,7 @@ export default function Reader() {
                 path={currentPath}
                 format={format}
                 settings={settings}
+                imageMaxWidth={prefs.image_max_width}
                 onPageInfo={(c, t) => {
                   setPageInfo({ current: c, total: t });
                   if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});

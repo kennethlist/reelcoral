@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, logout, getConfig, fetchThumbnailBatch, AppConfig, BrowseResult, BrowseEntry, downloadUrl, setFileStatus, clearFileStatus, getUserData, saveUserData } from "../api";
+import { browse, logout, getConfig, fetchThumbnailBatch, generateThumbnail, AppConfig, BrowseResult, BrowseEntry, ThumbnailInfo, downloadUrl, setFileStatus, clearFileStatus, getUserData, saveUserData, mediaUrl } from "../api";
 import VideoCard from "../components/VideoCard";
 import Breadcrumbs from "../components/Breadcrumbs";
 import SearchBar from "../components/SearchBar";
@@ -230,7 +230,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const [error, setError] = useState("");
   const [editingThumbnail, setEditingThumbnail] = useState<string | null>(null);
   const [thumbVersion, setThumbVersion] = useState(0);
-  const [thumbDataMap, setThumbDataMap] = useState<Record<string, string>>({});
+  const [thumbHashMap, setThumbHashMap] = useState<Record<string, ThumbnailInfo>>({});
+  const [thumbGenerated, setThumbGenerated] = useState<Set<string>>(new Set());
 
   // Per-directory sort preferences persisted to DB
   const dirSortMapRef = useRef<Record<string, { sort: string; dir: string }>>({});
@@ -289,7 +290,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     setError("");
-    setThumbDataMap({});
+    setThumbHashMap({});
+    setThumbGenerated(new Set());
     browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
       .then((result) => {
         setData(result);
@@ -298,17 +300,29 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         if (savedY !== null) {
           requestAnimationFrame(() => window.scrollTo({ top: savedY, behavior: "instant" }));
         }
-        // Batch-fetch thumbnails for entries that use the standard /api/thumbnail endpoint
+        // Batch-fetch thumbnail hashes
         const thumbPaths = result.entries
-          .filter((e) => !e.is_image && !e.is_audio && !e.is_ebook && !e.is_comic && !e.is_markdown && !e.name.toLowerCase().endsWith(".pdf"))
+          .filter((e) => !e.is_audio && !e.is_markdown)
           .map((e) => e.path);
         if (thumbPaths.length > 0 && !result.is_music_context) {
           fetchThumbnailBatch(thumbPaths).then((map) => {
-            const filtered: Record<string, string> = {};
+            const filtered: Record<string, ThumbnailInfo> = {};
+            const uncached: string[] = [];
             for (const [k, v] of Object.entries(map)) {
-              if (v) filtered[k] = v;
+              if (v) {
+                filtered[k] = v;
+                if (!v.cached) uncached.push(k);
+              }
             }
-            setThumbDataMap(filtered);
+            setThumbHashMap(filtered);
+            // Fire off individual generation requests so thumbnails pop in one by one
+            for (const path of uncached) {
+              generateThumbnail(path).then((ok) => {
+                if (ok) {
+                  setThumbGenerated((prev) => new Set(prev).add(path));
+                }
+              }).catch(() => {});
+            }
           }).catch(() => {});
         }
       })
@@ -575,7 +589,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
             <div className="mb-4 flex items-center gap-3 mr-8">
               {data.cover_art && (
                 <img
-                  src={`/api/image?path=${encodeURIComponent(data.cover_art)}`}
+                  src={mediaUrl(data.cover_art)}
                   alt=""
                   className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
                 />
@@ -725,7 +739,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
                     onEditThumbnail={() => setEditingThumbnail(entry.path)}
                     thumbVersion={thumbVersion}
                     generateOnFly={generateOnFly}
-                    thumbData={thumbDataMap[entry.path]}
+                    thumbHash={thumbHashMap[entry.path]?.hash}
+                    thumbReady={thumbHashMap[entry.path]?.cached || thumbGenerated.has(entry.path)}
                     fileStatus={entry.file_status}
                     onStatusChange={handleStatusChange}
                   />
@@ -770,9 +785,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
             const edited = editingThumbnail;
             setEditingThumbnail(null);
             setThumbVersion((v) => v + 1);
-            // Clear stale batch-fetched thumbnail so the card uses the
-            // versioned URL which will fetch the freshly-saved image.
-            setThumbDataMap((prev) => {
+            // Clear stale hash so the card refreshes via the versioned URL.
+            setThumbHashMap((prev) => {
               if (!edited || !(edited in prev)) return prev;
               const next = { ...prev };
               delete next[edited];

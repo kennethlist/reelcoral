@@ -21,6 +21,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     intel-media-va-driver-non-free \
     vainfo \
     unrar \
+    nginx \
+    openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # Python dependencies
@@ -44,7 +46,11 @@ ENV MEDIA_CACHE_DIR=/cache/thumbnails
 ENV MEDIA_STREAM_TMPDIR=/tmp/media_streams
 ENV PATH="/app/venv/bin:$PATH"
 
+# nginx config and entrypoint
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 EXPOSE 8080
 
-WORKDIR /app/server
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--worker-class", "gevent", "--workers", "1", "--worker-connections", "200", "--timeout", "300", "app:create_app()"]
+CMD ["/app/entrypoint.sh"]
