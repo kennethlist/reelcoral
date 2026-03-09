@@ -1,6 +1,8 @@
 import os
+import json
 from flask import Blueprint, request, jsonify, current_app, session
 import db
+from thumbnail import cache_path_for, _resolve_thumb_target, _migrate_legacy, CACHE_DIR as THUMB_CACHE_DIR
 
 browse_bp = Blueprint("browse", __name__)
 
@@ -193,6 +195,34 @@ def browse():
             if e["path"] in statuses:
                 e["file_status"] = statuses[e["path"]]
 
+    # Resolve thumbnail hashes for page entries (skip music context)
+    thumbnails = {}
+    if not is_music_context:
+        thumb_paths = [e["path"] for e in page_entries if not e.get("is_audio") and not e.get("is_markdown")]
+        if thumb_paths:
+            overrides = {}
+            overrides_file = os.path.join(os.path.dirname(THUMB_CACHE_DIR), "thumbnail_overrides.json")
+            if os.path.exists(overrides_file):
+                try:
+                    with open(overrides_file) as f:
+                        overrides = json.load(f)
+                except Exception:
+                    pass
+            real_root = os.path.realpath(root)
+            for path in thumb_paths:
+                override_hash = overrides.get(path)
+                if override_hash:
+                    override_cache = cache_path_for(override_hash)
+                    if os.path.exists(override_cache):
+                        thumbnails[path] = {"hash": override_hash, "cached": True}
+                        continue
+                resolved = _resolve_thumb_target(root, real_root, path, extensions)
+                if not resolved:
+                    continue
+                _target, path_hash, _is_image, _is_book = resolved
+                cp = _migrate_legacy(path_hash)
+                thumbnails[path] = {"hash": path_hash, "cached": os.path.exists(cp)}
+
     # Build breadcrumbs
     parts = [p for p in rel_path.split("/") if p]
     breadcrumbs = [{"name": "Home", "path": "/"}]
@@ -209,6 +239,7 @@ def browse():
         "limit": limit,
         "breadcrumbs": breadcrumbs,
         "letters": sorted(letters),
+        "thumbnails": thumbnails,
     }
     if is_music_context:
         result["is_music_context"] = True

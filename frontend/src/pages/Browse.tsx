@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { browse, logout, getConfig, fetchThumbnailBatch, generateThumbnail, AppConfig, BrowseResult, BrowseEntry, ThumbnailInfo, downloadUrl, setFileStatus, clearFileStatus, getUserData, saveUserData, mediaUrl } from "../api";
+import { browse, logout, getConfig, generateThumbnail, AppConfig, BrowseResult, BrowseEntry, ThumbnailInfo, downloadUrl, setFileStatus, clearFileStatus, getUserData, saveUserData, mediaUrl } from "../api";
 import VideoCard from "../components/VideoCard";
 import Breadcrumbs from "../components/Breadcrumbs";
 import SearchBar from "../components/SearchBar";
@@ -300,28 +300,22 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         if (savedY !== null) {
           requestAnimationFrame(() => window.scrollTo({ top: savedY, behavior: "instant" }));
         }
-        // Batch-fetch thumbnail hashes
-        const thumbPaths = result.entries
-          .filter((e) => !e.is_audio && !e.is_markdown)
-          .map((e) => e.path);
-        if (thumbPaths.length > 0 && !result.is_music_context) {
-          fetchThumbnailBatch(thumbPaths).then((map) => {
-            const filtered: Record<string, ThumbnailInfo> = {};
-            const uncached: string[] = [];
-            for (const [k, v] of Object.entries(map)) {
-              if (v) {
-                filtered[k] = v;
-                if (!v.cached) uncached.push(k);
-              }
-            }
-            setThumbHashMap(filtered);
-            // Fire off individual generation requests so thumbnails pop in one by one
-            for (const path of uncached) {
-              generateThumbnail(path).then((ok) => {
-                if (ok) {
-                  setThumbGenerated((prev) => new Set(prev).add(path));
-                }
-              }).catch(() => {});
+        // Use inline thumbnail data from browse response
+        const thumbs = result.thumbnails || {};
+        const filtered: Record<string, ThumbnailInfo> = {};
+        const uncached: string[] = [];
+        for (const [k, v] of Object.entries(thumbs)) {
+          if (v) {
+            filtered[k] = v;
+            if (!v.cached) uncached.push(k);
+          }
+        }
+        setThumbHashMap(filtered);
+        // Fire off individual generation requests so thumbnails pop in one by one
+        for (const path of uncached) {
+          generateThumbnail(path).then((ok) => {
+            if (ok) {
+              setThumbGenerated((prev) => new Set(prev).add(path));
             }
           }).catch(() => {});
         }

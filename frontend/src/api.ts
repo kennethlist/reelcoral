@@ -48,6 +48,7 @@ export interface BrowseResult {
   limit: number;
   breadcrumbs: Breadcrumb[];
   letters: string[];
+  thumbnails: Record<string, ThumbnailInfo | null>;
   is_music_context?: boolean;
   is_music_folder?: boolean;
   cover_art?: string;
