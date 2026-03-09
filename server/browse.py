@@ -1,5 +1,6 @@
 import os
 import json
+import hashlib
 from flask import Blueprint, request, jsonify, current_app, session
 import db
 from thumbnail import cache_path_for, _resolve_thumb_target, _migrate_legacy, CACHE_DIR as THUMB_CACHE_DIR
@@ -104,6 +105,7 @@ def browse():
             "name": name,
             "path": entry_path,
             "is_dir": is_dir,
+            "_abs": full,
         }
         if not is_dir:
             entry["is_image"] = ext in IMAGE_EXTS
@@ -198,30 +200,75 @@ def browse():
     # Resolve thumbnail hashes for page entries (skip music context)
     thumbnails = {}
     if not is_music_context:
-        thumb_paths = [e["path"] for e in page_entries if not e.get("is_audio") and not e.get("is_markdown")]
-        if thumb_paths:
-            overrides = {}
-            overrides_file = os.path.join(os.path.dirname(THUMB_CACHE_DIR), "thumbnail_overrides.json")
-            if os.path.exists(overrides_file):
-                try:
-                    with open(overrides_file) as f:
-                        overrides = json.load(f)
-                except Exception:
-                    pass
-            real_root = os.path.realpath(root)
-            for path in thumb_paths:
-                override_hash = overrides.get(path)
-                if override_hash:
-                    override_cache = cache_path_for(override_hash)
-                    if os.path.exists(override_cache):
-                        thumbnails[path] = {"hash": override_hash, "cached": True}
+        # Load overrides once
+        overrides = {}
+        overrides_file = os.path.join(os.path.dirname(THUMB_CACHE_DIR), "thumbnail_overrides.json")
+        if os.path.exists(overrides_file):
+            try:
+                with open(overrides_file) as f:
+                    overrides = json.load(f)
+            except Exception:
+                pass
+        # Load dir→hash index for fast directory thumbnail lookups
+        dir_index_file = os.path.join(THUMB_CACHE_DIR, "dir_thumb_index.json")
+        dir_index = {}
+        if os.path.exists(dir_index_file):
+            try:
+                with open(dir_index_file) as f:
+                    dir_index = json.load(f)
+            except Exception:
+                pass
+        dir_index_dirty = False
+        real_root = os.path.realpath(root)
+        for e in page_entries:
+            if e.get("is_audio") or e.get("is_markdown"):
+                continue
+            path = e["path"]
+            abs_entry = e["_abs"]
+            # Check override first
+            override_hash = overrides.get(path)
+            if override_hash:
+                override_cache = cache_path_for(override_hash)
+                if os.path.exists(override_cache):
+                    thumbnails[path] = {"hash": override_hash, "cached": True}
+                    continue
+            if not e["is_dir"]:
+                # Files: hash directly from absolute path (fast, no scan needed)
+                path_hash = hashlib.sha256(abs_entry.encode()).hexdigest()
+                cp = _migrate_legacy(path_hash)
+                thumbnails[path] = {"hash": path_hash, "cached": os.path.exists(cp)}
+            else:
+                # Directories: check index first to avoid expensive recursive scan
+                if abs_entry in dir_index:
+                    path_hash = dir_index[abs_entry]
+                    cp = cache_path_for(path_hash)
+                    if os.path.exists(cp):
+                        thumbnails[path] = {"hash": path_hash, "cached": True}
                         continue
+                # Fall back to full resolve (recursive scan)
                 resolved = _resolve_thumb_target(root, real_root, path, extensions)
                 if not resolved:
                     continue
                 _target, path_hash, _is_image, _is_book = resolved
                 cp = _migrate_legacy(path_hash)
-                thumbnails[path] = {"hash": path_hash, "cached": os.path.exists(cp)}
+                cached = os.path.exists(cp)
+                thumbnails[path] = {"hash": path_hash, "cached": cached}
+                # Cache the mapping so future requests skip the scan
+                if cached:
+                    dir_index[abs_entry] = path_hash
+                    dir_index_dirty = True
+        # Persist updated dir index
+        if dir_index_dirty:
+            try:
+                os.makedirs(os.path.dirname(dir_index_file), exist_ok=True)
+                with open(dir_index_file, "w") as f:
+                    json.dump(dir_index, f)
+            except Exception:
+                pass
+
+    # Strip internal fields before response
+    for e in page_entries:
+        e.pop("_abs", None)
 
     # Build breadcrumbs
     parts = [p for p in rel_path.split("/") if p]
