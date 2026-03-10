@@ -36,6 +36,7 @@ class StreamSession:
         self.dir = os.path.join(TMPDIR, session_id)
         self.last_access = time.time()
         self.started = False
+        self.is_copy_mode = False
         self.error_log = os.path.join(TMPDIR, f"{session_id}.log")
 
     def start(self):
@@ -127,7 +128,8 @@ class StreamSession:
             else:
                 sub_filter = f"subtitles='{escaped}':si={si},"
 
-        if profile.get("name") == "original" and not needs_transcode:
+        self.is_copy_mode = profile.get("name") == "original" and not needs_transcode
+        if self.is_copy_mode:
             cmd += ["-c:v", "copy", "-c:a", "copy"]
         elif profile.get("name") == "original" and needs_transcode:
             # Transcode non-H.264 source to H.264 at source resolution
@@ -434,8 +436,9 @@ def start():
     }
     if media_info:
         result["media_info"] = media_info
-    # For copy-mode streams, tell the frontend the actual keyframe start time
-    if keyframe_time[0] != start_time:
+    # For copy-mode streams, tell the frontend the actual keyframe start time.
+    # Only relevant when actually copying (not when original triggers transcode).
+    if sess.is_copy_mode and keyframe_time[0] != start_time:
         result["actual_start"] = keyframe_time[0]
     return jsonify(result)
 
