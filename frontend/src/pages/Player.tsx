@@ -259,9 +259,14 @@ export default function Player() {
             // the seek preview so displayTime switches to the real value.
             // seekOffsetRef uses requested startAt (for progress bar display).
             // subOffsetRef uses actualStart (keyframe-snapped, for subtitle sync).
+            // Set subOffsetRef directly (not relative to video.currentTime)
+            // because hls.js may normalize the PTS timeline after the playing
+            // event, which would invalidate a currentTime-relative calculation.
+            // With startPosition:0, currentTime starts at 0 after normalization,
+            // so absTime = actualStart + currentTime maps to file time correctly.
+            subOffsetRef.current = actualStart;
             const onPlaying = () => {
               seekOffsetRef.current = startAt - video.currentTime;
-              subOffsetRef.current = actualStart - video.currentTime;
               setCurrentTime(video.currentTime);
               setSeekPreview(null);
               video.removeEventListener("playing", onPlaying);
@@ -278,11 +283,11 @@ export default function Player() {
           }
           setSubText("");
           video.src = sess.playlist;
+          subOffsetRef.current = actualStart;
           video.addEventListener("loadedmetadata", () => {
             setLoading(false);
             const onPlaying = () => {
               seekOffsetRef.current = startAt - video.currentTime;
-              subOffsetRef.current = actualStart - video.currentTime;
               setCurrentTime(video.currentTime);
               setSeekPreview(null);
               video.removeEventListener("playing", onPlaying);
