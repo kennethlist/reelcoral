@@ -318,7 +318,7 @@ def _find_keyframe_time(filepath, target_time):
                     pts = float(parts[0])
                 except ValueError:
                     continue
-                if pts <= target_time + 0.1:
+                if pts <= target_time:
                     best = max(best, pts)
         return best if best > 0 else target_time
     except Exception:
