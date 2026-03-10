@@ -23,13 +23,14 @@ SAFE_CODECS = {"h264"}
 
 
 class StreamSession:
-    def __init__(self, session_id, filepath, profile_cfg, audio_idx, start_time, config, sub_idx=None):
+    def __init__(self, session_id, filepath, profile_cfg, audio_idx, start_time, config, sub_idx=None, keyframe_time=None):
         self.id = session_id
         self.filepath = filepath
         self.profile = profile_cfg
         self.audio_idx = audio_idx
         self.sub_idx = sub_idx
         self.start_time = start_time
+        self.keyframe_time = keyframe_time
         self.config = config
         self.process = None
         self.dir = os.path.join(TMPDIR, session_id)
@@ -73,9 +74,16 @@ class StreamSession:
 
         cmd = ["ffmpeg", "-y"]
 
-        # Seek before input for speed
-        if self.start_time > 0:
-            cmd += ["-ss", str(self.start_time)]
+        # Seek before input for speed.
+        # For pure copy mode, seek to the keyframe time (not the requested
+        # time) so that MPEGTS PTS starts at 0 for the keyframe — avoids
+        # negative PTS wrapping that confuses HLS players.
+        if profile.get("name") == "original" and not needs_transcode and self.keyframe_time is not None:
+            ss_time = self.keyframe_time
+        else:
+            ss_time = self.start_time
+        if ss_time > 0:
+            cmd += ["-ss", str(ss_time)]
 
         # Hardware accel init — skip only for original copy-through (no transcode needed)
         if profile.get("name") != "original" or needs_transcode:
@@ -393,8 +401,15 @@ def start():
         kf_thread = threading.Thread(target=do_kf_probe)
         kf_thread.start()
 
+    # Wait for keyframe probe before starting ffmpeg so copy-mode streams
+    # can seek to the exact keyframe (clean MPEGTS PTS, no wrapping).
+    if kf_thread:
+        kf_thread.join()
+        kf_thread = None
+
     session_id = str(uuid.uuid4())
-    sess = StreamSession(session_id, filepath, profile, audio_idx, start_time, config, sub_idx)
+    kf = keyframe_time[0] if keyframe_time[0] != start_time else None
+    sess = StreamSession(session_id, filepath, profile, audio_idx, start_time, config, sub_idx, keyframe_time=kf)
 
     t1 = time.time()
     try:
@@ -402,8 +417,6 @@ def start():
     except Exception as e:
         sess.kill()
         probe_thread.join()
-        if kf_thread:
-            kf_thread.join()
         return jsonify({"error": str(e)}), 500
     t2 = time.time()
 
@@ -411,8 +424,6 @@ def start():
         sessions[session_id] = sess
 
     probe_thread.join()
-    if kf_thread:
-        kf_thread.join()
     t3 = time.time()
     log.info("TIMING /start: ffmpeg_launch=%.2fs probe_wait=%.2fs total=%.2fs",
              t2 - t1, t3 - t2, t3 - t0)
