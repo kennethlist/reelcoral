@@ -180,7 +180,6 @@ function EpubReader({
       if (cancelled) return;
       setInfo(data);
 
-      const saved = initialPosition;
       const count = data.chapter_count;
       const parts: string[] = new Array(count);
 
@@ -193,33 +192,40 @@ function EpubReader({
       }
       if (cancelled) return;
 
-      // All chapters loaded — set HTML once and restore position
+      // All chapters loaded — set HTML once
       const fullHtml = parts.join('<hr class="epub-chapter-break" />');
       setHtml(fullHtml);
       setFullyLoaded(true);
-
-      // Restore saved position
-      if (saved?.progress != null) {
-        progressRef.current = saved.progress;
-      }
-      if (settings.navMode === "scroll" && saved?.scrollY) {
-        setLoading(false);
-        requestAnimationFrame(() => {
-          contentRef.current?.scrollTo({ top: saved.scrollY });
-          requestAnimationFrame(() => setContentReady(true));
-        });
-      } else if (settings.navMode === "page" && saved?.progress != null) {
-        setLoading(false);
-        // contentReady will be set after countPages runs
-      } else {
-        setLoading(false);
-        setContentReady(true);
-      }
-      positionRestoredRef.current = true;
     });
 
     return () => { cancelled = true; };
   }, [path]);
+
+  // Restore saved position once chapters are fully loaded.
+  // Separated from chapter loading so it always reads the latest initialPosition
+  // (which may arrive from the server after chapter loading started).
+  useEffect(() => {
+    if (!fullyLoaded) return;
+    const saved = initialPosition;
+
+    if (saved?.progress != null) {
+      progressRef.current = saved.progress;
+    }
+    if (settings.navMode === "scroll" && saved?.scrollY) {
+      setLoading(false);
+      requestAnimationFrame(() => {
+        contentRef.current?.scrollTo({ top: saved.scrollY });
+        requestAnimationFrame(() => setContentReady(true));
+      });
+    } else if (settings.navMode === "page" && saved?.progress != null) {
+      setLoading(false);
+      // contentReady will be set after countPages runs
+    } else {
+      setLoading(false);
+      setContentReady(true);
+    }
+    positionRestoredRef.current = true;
+  }, [fullyLoaded, initialPosition]);
 
   // Clipping wrapper ref — used to measure the single-page width and height.
   const wrapperRef = useRef<HTMLDivElement>(null);
