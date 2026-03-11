@@ -98,7 +98,7 @@ export default function Gallery() {
       }
     } catch {}
     setLoading(true);
-    browse(parentDir, 1, 0, search, letter, sort, sortDir)
+    browse(parentDir, 1, 0, search, letter, sort, sortDir, true)
       .then((data) => {
         const files = data.entries.filter((e) => !e.is_dir);
         setAllFiles(files);

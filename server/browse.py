@@ -59,6 +59,7 @@ def browse():
     letter = request.args.get("letter", "").strip()
     sort = request.args.get("sort", "alpha").strip().lower()
     sort_dir = request.args.get("dir", "asc").strip().lower()
+    lite = request.args.get("lite", "0") == "1"
 
     abs_path = os.path.realpath(os.path.join(root, rel_path))
     if not abs_path.startswith(os.path.realpath(root)):
@@ -115,13 +116,14 @@ def browse():
             entry["is_markdown"] = ext in MARKDOWN_EXTS
             if ext in AUDIO_EXTS:
                 has_audio_files = True
-            try:
-                entry["size"] = os.path.getsize(full)
-            except OSError:
-                entry["size"] = 0
+            if not lite:
+                try:
+                    entry["size"] = os.path.getsize(full)
+                except OSError:
+                    entry["size"] = 0
         else:
             # For subdirectories in music context, scan for cover art and detect albums
-            if is_music_context:
+            if is_music_context and not lite:
                 cover = _find_cover_art(full, rel_path, name)
                 if cover:
                     entry["cover_art"] = cover
@@ -129,10 +131,11 @@ def browse():
                 # At depth 0 (music root), subdirectories are artists, not albums
                 if music_depth >= 1 and _dir_has_audio(full):
                     entry["is_album"] = True
-        try:
-            entry["mtime"] = os.path.getmtime(full)
-        except OSError:
-            entry["mtime"] = 0
+        if not lite:
+            try:
+                entry["mtime"] = os.path.getmtime(full)
+            except OSError:
+                entry["mtime"] = 0
         entries.append(entry)
 
     # Determine if this is an album-level folder (contains audio files)
@@ -144,6 +147,9 @@ def browse():
         dir_cover_art = _find_cover_art_in(abs_path, rel_path)
 
     # Sort: directories first, then files sorted by chosen mode and direction
+    # In lite mode, force alphabetical sort (no mtime/size available)
+    if lite and sort in ("newest", "largest", "recent"):
+        sort = "alpha"
     reverse = sort_dir == "desc"
     if sort == "recent":
         user_id = session.get("user", "anonymous")
@@ -188,18 +194,19 @@ def browse():
         start = (page - 1) * limit
         page_entries = entries[start : start + limit]
 
-    # Attach file_status to page entries
-    user_id = session.get("user", "anonymous")
-    file_paths = [e["path"] for e in page_entries if not e["is_dir"]]
-    if file_paths:
-        statuses = db.get_file_statuses(user_id, file_paths)
-        for e in page_entries:
-            if e["path"] in statuses:
-                e["file_status"] = statuses[e["path"]]
+    # Attach file_status to page entries (skip in lite mode)
+    if not lite:
+        user_id = session.get("user", "anonymous")
+        file_paths = [e["path"] for e in page_entries if not e["is_dir"]]
+        if file_paths:
+            statuses = db.get_file_statuses(user_id, file_paths)
+            for e in page_entries:
+                if e["path"] in statuses:
+                    e["file_status"] = statuses[e["path"]]
 
-    # Resolve thumbnail hashes for page entries (skip music context)
+    # Resolve thumbnail hashes for page entries (skip music context and lite mode)
     thumbnails = {}
-    if not is_music_context:
+    if not is_music_context and not lite:
         # Load overrides once
         overrides = {}
         overrides_file = os.path.join(os.path.dirname(THUMB_CACHE_DIR), "thumbnail_overrides.json")

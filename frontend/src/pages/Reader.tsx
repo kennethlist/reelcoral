@@ -1002,7 +1002,7 @@ export default function Reader() {
   // Initialize from _positionMap (pre-populated from localStorage) so we
   // don't have to wait for the async server fetch before rendering the reader.
   const [initialPosition, setInitialPosition] = useState<ReadPosition | null | undefined>(
-    () => _positionMap[currentPath] || null
+    () => _positionMap[currentPath] || undefined
   );
 
   // Apply server defaults for book font settings (only if user hasn't saved a preference)

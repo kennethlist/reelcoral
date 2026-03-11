@@ -61,13 +61,15 @@ export async function browse(
   search = "",
   letter?: string,
   sort?: string,
-  sortDir?: string
+  sortDir?: string,
+  lite?: boolean
 ): Promise<BrowseResult> {
   const params = new URLSearchParams({ path, page: String(page), limit: String(limit) });
   if (search) params.set("search", search);
   if (letter) params.set("letter", letter);
   if (sort && sort !== "alpha") params.set("sort", sort);
   if (sortDir && sortDir !== "asc") params.set("dir", sortDir);
+  if (lite) params.set("lite", "1");
   const res = await fetch(`/api/browse?${params}`);
   if (!res.ok) throw new Error("Browse failed");
   return res.json();
