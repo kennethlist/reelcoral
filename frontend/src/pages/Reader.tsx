@@ -46,19 +46,9 @@ interface ReadPosition {
 
 let _positionSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const _positionMap: Record<string, ReadPosition> = {};
-const _POSITIONS_LS_KEY = "rc-read-positions";
-
-// Bootstrap from localStorage so positions survive page reload even if
-// the async server fetch hasn't returned yet.
-try {
-  const raw = localStorage.getItem(_POSITIONS_LS_KEY);
-  if (raw) Object.assign(_positionMap, JSON.parse(raw));
-} catch {}
 
 function savePosition(path: string, pos: ReadPosition) {
   _positionMap[path] = pos;
-  // Synchronous localStorage write — survives page reload immediately
-  try { localStorage.setItem(_POSITIONS_LS_KEY, JSON.stringify(_positionMap)); } catch {}
   // Debounced server save (every 5s)
   if (_positionSaveTimer) clearTimeout(_positionSaveTimer);
   _positionSaveTimer = setTimeout(() => {
@@ -72,7 +62,6 @@ function flushPositionSave(useSendBeacon = false) {
     _positionSaveTimer = null;
   }
   if (Object.keys(_positionMap).length > 0) {
-    try { localStorage.setItem(_POSITIONS_LS_KEY, JSON.stringify(_positionMap)); } catch {}
     if (useSendBeacon && navigator.sendBeacon) {
       navigator.sendBeacon(
         `/api/user/data/${encodeURIComponent("read_positions")}`,
@@ -1046,11 +1035,8 @@ export default function Reader() {
       if (serverPositions && Object.keys(serverPositions).length > 0) {
         Object.assign(_positionMap, serverPositions);
       }
-      // Use _positionMap (has both in-memory + server data) so positions
-      // survive SPA navigation even if the server save is still in-flight.
       setInitialPosition(_positionMap[currentPath] || null);
     }).catch(() => {
-      // Even if server fetch fails, check in-memory positions
       setInitialPosition(_positionMap[currentPath] || null);
     });
   }, []);

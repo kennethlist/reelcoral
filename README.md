@@ -37,10 +37,11 @@ A self-hosted media server for streaming video, music, books, and images through
 - Thumbnail grid with format-aware covers (book covers, comic pages, PDF first pages)
 - Per-file download and bulk ZIP download with multi-select
 - Cross-format sibling navigation (video, audio, image, and book files in the same directory)
+- Markdown file rendering
 
 ### General
 - Simple username/password authentication with session management
-- Configurable user preferences (quality, audio language, subtitle language, subtitle display)
+- Configurable user preferences (quality, audio language, subtitle language, subtitle display, grid size, page size)
 
 ## Tech Stack
 
@@ -48,6 +49,7 @@ A self-hosted media server for streaming video, music, books, and images through
 |-------|-----------|
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, HLS.js |
 | Backend | Python, Flask, Gunicorn (gevent) |
+| Reverse Proxy | Nginx with auto-generated self-signed TLS |
 | Transcoding | FFmpeg with VAAPI/QSV hardware acceleration |
 | Books | ebooklib (EPUB), PyMuPDF (PDF), rarfile (CBR), zipfile (CBZ) |
 | Fonts | Self-hosted webfonts (Liberation, Ubuntu, Noto, Roboto, DejaVu) |
@@ -59,10 +61,10 @@ A self-hosted media server for streaming video, music, books, and images through
 
 1. Copy and edit the configuration file:
    ```bash
-   cp config.example.yml config.yml
+   cp data/config.example.yml data/config.yml
    ```
 
-2. Edit `config.yml` - at minimum, change the `secret` and `auth` credentials.
+2. Edit `data/config.yml` - at minimum, change the `secret` and `auth` credentials.
 
 3. Place your media files in the `media/` directory (or update the volume mount in `docker-compose.yml`).
 
@@ -71,7 +73,7 @@ A self-hosted media server for streaming video, music, books, and images through
    docker-compose up -d
    ```
 
-5. Access at `http://localhost:8080`
+5. Access at `https://localhost:8080` (self-signed certificate)
 
 ### Manual Setup
 
@@ -103,7 +105,7 @@ npm run dev  # http://localhost:5173
 
 ## Configuration
 
-Configuration is managed through `config.yml`. See `config.example.yml` for the full template.
+Configuration is managed through `data/config.yml`. See `data/config.example.yml` for the full template.
 
 ### Key Settings
 
@@ -119,54 +121,17 @@ Configuration is managed through `config.yml`. See `config.example.yml` for the 
 | `music.profiles` | Audio transcoding bitrate options | *(see example config)* |
 | `thumbnails.generate_on_fly` | Generate thumbnails on first access | `true` |
 | `thumbnails.threads` | Threads for batch thumbnail generation | `24` |
+| `defaults.grid_size` | Browse grid size (`small` or `large`) | `small` |
+| `defaults.page_size` | Items per page (12, 24, 36, 48, or 60) | `12` |
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MEDIA_CONFIG` | Path to config.yml | `/config/config.yml` |
+| `MEDIA_CONFIG` | Path to config.yml | `/data/config.yml` |
 | `MEDIA_CACHE_DIR` | Thumbnail cache directory | `/cache/thumbnails` |
 | `MEDIA_STREAM_TMPDIR` | Temp directory for HLS segments | `/tmp/media_streams` |
 
 ### Hardware Acceleration
 
 For VAAPI (Intel GPU), ensure `/dev/dri` is passed through to the container (included by default in `docker-compose.yml`). Set `transcoding.hardware` to `vaapi` or `qsv` as appropriate. Use `software` as a fallback if no compatible GPU is available.
-
-## Project Structure
-
-```
-reelcoral/
-├── frontend/              # React/TypeScript frontend
-│   ├── public/fonts/      # Self-hosted webfonts (woff2)
-│   └── src/
-│       ├── pages/         # Browse, Player, AudioPlayer, Gallery, Reader, Login, etc.
-│       ├── components/    # VideoCard, SearchBar, Breadcrumbs, TrackSelector, etc.
-│       ├── hooks/         # Custom React hooks (useMusicPlayer, etc.)
-│       └── api.ts         # API client
-├── server/                # Python Flask backend
-│   ├── app.py             # Flask app factory
-│   ├── stream.py          # HLS streaming & transcoding
-│   ├── browse.py          # Media browsing API
-│   ├── ebook.py           # EPUB parsing & chapter serving
-│   ├── pdf.py             # PDF page rendering
-│   ├── comic.py           # CBR/CBZ page extraction
-│   ├── thumbnail.py       # Thumbnail serving
-│   ├── thumbnail_gen.py   # Batch thumbnail generation
-│   ├── subtitle.py        # Subtitle extraction/conversion
-│   └── auth.py            # Authentication
-├── config.example.yml     # Configuration template
-├── docker-compose.yml     # Docker Compose config
-└── Dockerfile             # Multi-stage Docker build
-```
-
-## Bundled Font Licenses
-
-All reader fonts are self-hosted with no external dependencies:
-
-| Font | License |
-|------|---------|
-| Liberation Serif/Sans | SIL Open Font License 1.1 |
-| Ubuntu | Ubuntu Font Licence 1.0 |
-| Noto Serif/Sans | SIL Open Font License 1.1 |
-| Roboto | Apache License 2.0 |
-| DejaVu Serif/Sans | Bitstream Vera License |
