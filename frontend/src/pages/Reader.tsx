@@ -192,40 +192,40 @@ function EpubReader({
       }
       if (cancelled) return;
 
-      // All chapters loaded — set HTML once
+      // All chapters loaded — set HTML once and restore position.
+      // Read from _positionMap directly (module-level, updated by server fetch)
+      // rather than the closure-captured initialPosition which may be stale.
+      const saved = _positionMap[path] || initialPosition;
+      console.log("[EpubReader] chapters loaded, restore position:", { path, saved, _positionMap: { ..._positionMap }, initialPosition, navMode: settings.navMode });
       const fullHtml = parts.join('<hr class="epub-chapter-break" />');
       setHtml(fullHtml);
       setFullyLoaded(true);
+
+      // Restore saved position
+      if (saved?.progress != null) {
+        progressRef.current = saved.progress;
+        console.log("[EpubReader] set progressRef =", saved.progress);
+      }
+      if (settings.navMode === "scroll" && saved?.scrollY) {
+        setLoading(false);
+        requestAnimationFrame(() => {
+          contentRef.current?.scrollTo({ top: saved.scrollY });
+          requestAnimationFrame(() => setContentReady(true));
+        });
+      } else if (settings.navMode === "page" && saved?.progress != null) {
+        console.log("[EpubReader] page mode restore: waiting for countPages");
+        setLoading(false);
+        // contentReady will be set after countPages runs
+      } else {
+        console.log("[EpubReader] no position to restore, saved:", saved);
+        setLoading(false);
+        setContentReady(true);
+      }
+      positionRestoredRef.current = true;
     });
 
     return () => { cancelled = true; };
   }, [path]);
-
-  // Restore saved position once chapters are fully loaded.
-  // Separated from chapter loading so it always reads the latest initialPosition
-  // (which may arrive from the server after chapter loading started).
-  useEffect(() => {
-    if (!fullyLoaded) return;
-    const saved = initialPosition;
-
-    if (saved?.progress != null) {
-      progressRef.current = saved.progress;
-    }
-    if (settings.navMode === "scroll" && saved?.scrollY) {
-      setLoading(false);
-      requestAnimationFrame(() => {
-        contentRef.current?.scrollTo({ top: saved.scrollY });
-        requestAnimationFrame(() => setContentReady(true));
-      });
-    } else if (settings.navMode === "page" && saved?.progress != null) {
-      setLoading(false);
-      // contentReady will be set after countPages runs
-    } else {
-      setLoading(false);
-      setContentReady(true);
-    }
-    positionRestoredRef.current = true;
-  }, [fullyLoaded, initialPosition]);
 
   // Clipping wrapper ref — used to measure the single-page width and height.
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -253,6 +253,7 @@ function EpubReader({
     setTotalPages(pages);
     // Restore position from progress fraction
     const newPage = Math.min(Math.round(progressRef.current * (pages - 1)), pages - 1);
+    console.log("[EpubReader] countPages:", { pages, progressRef: progressRef.current, newPage, positionRestored: positionRestoredRef.current });
     setCurrentPage(newPage);
     // Reveal content after first countPages post-restore positions correctly
     if (!contentReady && positionRestoredRef.current) {
@@ -1038,9 +1039,11 @@ export default function Reader() {
       }
     }).catch(() => {});
     getUserData("read_positions").then((serverPositions) => {
+      console.log("[Reader] server positions:", serverPositions, "currentPath:", currentPath);
       if (serverPositions && Object.keys(serverPositions).length > 0) {
         Object.assign(_positionMap, serverPositions);
       }
+      console.log("[Reader] _positionMap[currentPath]:", _positionMap[currentPath]);
       setInitialPosition(_positionMap[currentPath] || null);
     }).catch(() => {
       setInitialPosition(_positionMap[currentPath] || null);

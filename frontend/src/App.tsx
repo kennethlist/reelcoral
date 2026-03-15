@@ -6,7 +6,7 @@ import Player from "./pages/Player";
 import AudioPlayer from "./pages/AudioPlayer";
 import Gallery from "./pages/Gallery";
 import Reader from "./pages/Reader";
-import { checkAuth, migrateLocalStorage } from "./api";
+import { checkAuth, migrateLocalStorage, onAuthLost } from "./api";
 import { MusicPlayerProvider } from "./hooks/useMusicPlayer";
 import MusicBar from "./components/MusicBar";
 
@@ -59,6 +59,10 @@ export default function App() {
 
   useEffect(() => {
     checkAuth().then(setAuthed);
+  }, []);
+
+  useEffect(() => {
+    return onAuthLost(() => setAuthed(false));
   }, []);
 
   // Run migration after auth check

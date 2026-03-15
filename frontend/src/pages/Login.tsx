@@ -1,5 +1,5 @@
 import { useState, FormEvent } from "react";
-import { login } from "../api";
+import { login, checkAuth } from "../api";
 
 export default function Login({ onLogin }: { onLogin: () => void }) {
   const [username, setUsername] = useState("");
@@ -11,12 +11,22 @@ export default function Login({ onLogin }: { onLogin: () => void }) {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const ok = await login(username, password);
-    setLoading(false);
-    if (ok) {
-      onLogin();
-    } else {
-      setError("Invalid username or password");
+    try {
+      const ok = await login(username, password);
+      if (!ok) {
+        setError("Invalid username or password");
+        return;
+      }
+      const verified = await checkAuth();
+      if (verified) {
+        onLogin();
+      } else {
+        setError("Login succeeded but session was not saved. Please try again.");
+      }
+    } catch {
+      setError("Login failed. Please try again.");
+    } finally {
+      setLoading(false);
     }
   }
 

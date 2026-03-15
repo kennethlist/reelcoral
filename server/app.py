@@ -3,6 +3,7 @@ import logging
 import yaml
 from datetime import timedelta
 from flask import Flask, send_from_directory
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 
@@ -21,7 +22,12 @@ def create_app():
     app = Flask(__name__, static_folder=None)
     app.secret_key = config["server"]["secret"]
     app.permanent_session_lifetime = timedelta(days=365)
+    app.config["SESSION_COOKIE_SECURE"] = True
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["MEDIA"] = config
+
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     from auth import auth_bp, login_required_api
     from browse import browse_bp

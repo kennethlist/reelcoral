@@ -1,3 +1,19 @@
+const authLostTarget = new EventTarget();
+
+function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, init).then((res) => {
+    if (res.status === 401) {
+      authLostTarget.dispatchEvent(new Event("auth-lost"));
+    }
+    return res;
+  });
+}
+
+export function onAuthLost(callback: () => void): () => void {
+  authLostTarget.addEventListener("auth-lost", callback);
+  return () => authLostTarget.removeEventListener("auth-lost", callback);
+}
+
 export async function checkAuth(): Promise<boolean> {
   try {
     const res = await fetch("/api/auth/check");
@@ -70,7 +86,7 @@ export async function browse(
   if (sort && sort !== "alpha") params.set("sort", sort);
   if (sortDir && sortDir !== "asc") params.set("dir", sortDir);
   if (lite) params.set("lite", "1");
-  const res = await fetch(`/api/browse?${params}`);
+  const res = await apiFetch(`/api/browse?${params}`);
   if (!res.ok) throw new Error("Browse failed");
   return res.json();
 }
@@ -109,7 +125,7 @@ export interface MediaInfo {
 }
 
 export async function getMediaInfo(path: string): Promise<MediaInfo> {
-  const res = await fetch(`/api/media/info?path=${encodeURIComponent(path)}`);
+  const res = await apiFetch(`/api/media/info?path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error("Info failed");
   return res.json();
 }
@@ -137,13 +153,13 @@ export async function startStream(
   });
   if (subIdx != null) params.set("sub", String(subIdx));
   if (replace) params.set("replace", replace);
-  const res = await fetch(`/api/stream/start?${params}`);
+  const res = await apiFetch(`/api/stream/start?${params}`);
   if (!res.ok) throw new Error("Stream start failed");
   return res.json();
 }
 
 export async function stopStream(sessionId: string): Promise<void> {
-  await fetch(`/api/stream/${sessionId}`, { method: "DELETE" });
+  await apiFetch(`/api/stream/${sessionId}`, { method: "DELETE" });
 }
 
 export async function getThumbnailCandidates(
@@ -152,7 +168,7 @@ export async function getThumbnailCandidates(
 ): Promise<{ candidates: (string | null)[] }> {
   const params = new URLSearchParams({ path, _t: String(Date.now()) });
   if (count) params.set("count", String(count));
-  const res = await fetch(`/api/thumbnail/candidates?${params}`);
+  const res = await apiFetch(`/api/thumbnail/candidates?${params}`);
   if (!res.ok) throw new Error("Failed to get candidates");
   return res.json();
 }
@@ -161,7 +177,7 @@ export async function selectThumbnailCandidate(
   path: string,
   index: number
 ): Promise<void> {
-  const res = await fetch("/api/thumbnail/select", {
+  const res = await apiFetch("/api/thumbnail/select", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, index }),
@@ -176,7 +192,7 @@ export async function uploadCustomThumbnail(
   const form = new FormData();
   form.append("path", path);
   form.append("image", image);
-  const res = await fetch("/api/thumbnail/select", {
+  const res = await apiFetch("/api/thumbnail/select", {
     method: "POST",
     body: form,
   });
@@ -184,7 +200,7 @@ export async function uploadCustomThumbnail(
 }
 
 export async function resetThumbnail(path: string): Promise<void> {
-  const res = await fetch(
+  const res = await apiFetch(
     `/api/thumbnail/select?path=${encodeURIComponent(path)}`,
     { method: "DELETE" }
   );
@@ -212,7 +228,7 @@ export interface AppConfig {
 }
 
 export async function getConfig(): Promise<AppConfig> {
-  const res = await fetch("/api/config");
+  const res = await apiFetch("/api/config");
   if (!res.ok) throw new Error("Config fetch failed");
   return res.json();
 }
@@ -231,7 +247,7 @@ export interface EbookInfo {
 }
 
 export async function getEbookInfo(path: string): Promise<EbookInfo> {
-  const res = await fetch(`/api/ebook/info?path=${encodeURIComponent(path)}`);
+  const res = await apiFetch(`/api/ebook/info?path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error("Ebook info failed");
   return res.json();
 }
@@ -239,7 +255,7 @@ export async function getEbookInfo(path: string): Promise<EbookInfo> {
 export async function getEbookChapter(path: string, index: number, maxWidth = 0): Promise<{ html: string; index: number }> {
   let url = `/api/ebook/chapter?path=${encodeURIComponent(path)}&index=${index}`;
   if (maxWidth > 0) url += `&maxWidth=${maxWidth}`;
-  const res = await fetch(url);
+  const res = await apiFetch(url);
   if (!res.ok) throw new Error("Ebook chapter failed");
   return res.json();
 }
@@ -254,7 +270,7 @@ export interface ComicInfo {
 }
 
 export async function getComicInfo(path: string): Promise<ComicInfo> {
-  const res = await fetch(`/api/comic/info?path=${encodeURIComponent(path)}`);
+  const res = await apiFetch(`/api/comic/info?path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error("Comic info failed");
   return res.json();
 }
@@ -272,7 +288,7 @@ export interface PdfInfo {
 }
 
 export async function getPdfInfo(path: string): Promise<PdfInfo> {
-  const res = await fetch(`/api/pdf/info?path=${encodeURIComponent(path)}`);
+  const res = await apiFetch(`/api/pdf/info?path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error("PDF info failed");
   return res.json();
 }
@@ -283,7 +299,7 @@ export function pdfPageUrl(path: string, page: number, fit = "width", width = 12
 
 // Markdown API
 export async function getMarkdownContent(path: string): Promise<{ html: string }> {
-  const res = await fetch(`/api/markdown/content?path=${encodeURIComponent(path)}`);
+  const res = await apiFetch(`/api/markdown/content?path=${encodeURIComponent(path)}`);
   if (!res.ok) throw new Error("Markdown content failed");
   return res.json();
 }
@@ -292,7 +308,7 @@ export async function getMarkdownContent(path: string): Promise<{ html: string }
 export interface ThumbnailInfo { hash: string; cached: boolean; }
 
 export async function fetchThumbnailBatch(paths: string[]): Promise<Record<string, ThumbnailInfo | null>> {
-  const res = await fetch("/api/thumbnails/batch", {
+  const res = await apiFetch("/api/thumbnails/batch", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paths }),
@@ -310,7 +326,7 @@ export function thumbnailUrl(hash: string, version?: number): string {
 
 // Trigger generation of a single missing thumbnail
 export async function generateThumbnail(path: string): Promise<boolean> {
-  const res = await fetch("/api/thumbnails/generate", {
+  const res = await apiFetch("/api/thumbnails/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paths: [path] }),
@@ -337,13 +353,13 @@ export function downloadUrl(path: string): string {
 
 // User Data API
 export async function getUserPreferences(): Promise<Record<string, unknown>> {
-  const res = await fetch("/api/user/preferences");
+  const res = await apiFetch("/api/user/preferences");
   if (!res.ok) return {};
   return res.json();
 }
 
 export async function saveUserPreferences(prefs: Record<string, unknown>): Promise<void> {
-  await fetch("/api/user/preferences", {
+  await apiFetch("/api/user/preferences", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(prefs),
@@ -351,13 +367,13 @@ export async function saveUserPreferences(prefs: Record<string, unknown>): Promi
 }
 
 export async function getUserData(key: string): Promise<Record<string, unknown>> {
-  const res = await fetch(`/api/user/data/${encodeURIComponent(key)}`);
+  const res = await apiFetch(`/api/user/data/${encodeURIComponent(key)}`);
   if (!res.ok) return {};
   return res.json();
 }
 
 export async function saveUserData(key: string, data: Record<string, unknown>): Promise<void> {
-  await fetch(`/api/user/data/${encodeURIComponent(key)}`, {
+  await apiFetch(`/api/user/data/${encodeURIComponent(key)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -365,7 +381,7 @@ export async function saveUserData(key: string, data: Record<string, unknown>): 
 }
 
 export async function setFileStatus(path: string, status: "opened" | "completed"): Promise<void> {
-  await fetch("/api/user/file-status", {
+  await apiFetch("/api/user/file-status", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, status }),
@@ -373,7 +389,7 @@ export async function setFileStatus(path: string, status: "opened" | "completed"
 }
 
 export async function clearFileStatus(path: string): Promise<void> {
-  await fetch("/api/user/file-status", {
+  await apiFetch("/api/user/file-status", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
@@ -381,7 +397,7 @@ export async function clearFileStatus(path: string): Promise<void> {
 }
 
 export async function migrateLocalStorage(data: Record<string, unknown>): Promise<void> {
-  const res = await fetch("/api/user/migrate", {
+  const res = await apiFetch("/api/user/migrate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
