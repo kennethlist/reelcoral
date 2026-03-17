@@ -574,15 +574,6 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
 
-        {loading && showSpinner && (
-          <div className="flex items-center justify-center py-16">
-            <svg className="w-8 h-8 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-            </svg>
-          </div>
-        )}
-
         {!data && !loading && !error && (
           <div className="flex items-center justify-center py-16 text-gray-400">Loading...</div>
         )}
@@ -591,6 +582,15 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           <div className="text-red-400 text-center py-8">{error}</div>
         )}
 
+        <div className="relative">
+        {loading && showSpinner && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center pt-16">
+            <svg className="w-8 h-8 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+        )}
         <div className={`transition-opacity duration-150 ${loading && showSpinner ? "opacity-40 pointer-events-none" : ""}`}>
         {data && data.entries.length === 0 && !activeLetter && (
           <div className="text-gray-500 text-center py-16">
@@ -777,6 +777,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           </>
         )}
 
+        </div>
         </div>
 
         {/* A-Z sidebar — fixed to right edge, fits between header and bottom */}
