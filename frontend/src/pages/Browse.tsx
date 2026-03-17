@@ -228,10 +228,19 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   const [data, setData] = useState<BrowseResult | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [showSpinner, setShowSpinner] = useState(false);
+  const spinnerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [editingThumbnail, setEditingThumbnail] = useState<string | null>(null);
   const [thumbVersion, setThumbVersion] = useState(0);
   const [thumbHashMap, setThumbHashMap] = useState<Record<string, ThumbnailInfo>>({});
   const [thumbGenerated, setThumbGenerated] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    return () => {
+      if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
+    };
+  }, []);
 
   // Per-directory sort preferences persisted to DB
   const dirSortMapRef = useRef<Record<string, { sort: string; dir: string }>>({});
@@ -290,6 +299,9 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
   useEffect(() => {
     setError("");
+    setLoading(true);
+    if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
+    spinnerTimerRef.current = setTimeout(() => setShowSpinner(true), 300);
     browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
       .then((result) => {
         setData(result);
@@ -319,7 +331,13 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           }).catch(() => {});
         }
       })
-      .catch(() => setError("Failed to load directory"));
+      .catch(() => setError("Failed to load directory"))
+      .finally(() => {
+        setLoading(false);
+        if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
+        spinnerTimerRef.current = null;
+        setShowSpinner(false);
+      });
   }, [currentPath, currentPage, prefs.page_size, currentSearch, activeLetter, currentSort, currentSortDir]);
 
   function addSortParams(params: Record<string, string>, sort = currentSort, dir = currentSortDir) {
@@ -556,7 +574,16 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           </div>
         </div>
 
-        {!data && !error && (
+        {loading && showSpinner && (
+          <div className="flex items-center justify-center py-16">
+            <svg className="w-8 h-8 animate-spin text-blue-500" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+          </div>
+        )}
+
+        {!data && !loading && !error && (
           <div className="flex items-center justify-center py-16 text-gray-400">Loading...</div>
         )}
 
@@ -564,6 +591,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           <div className="text-red-400 text-center py-8">{error}</div>
         )}
 
+        <div className={`transition-opacity duration-150 ${loading && showSpinner ? "opacity-40 pointer-events-none" : ""}`}>
         {data && data.entries.length === 0 && !activeLetter && (
           <div className="text-gray-500 text-center py-16">
             {currentSearch ? "No matching files" : "Empty directory"}
@@ -748,6 +776,8 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
             />
           </>
         )}
+
+        </div>
 
         {/* A-Z sidebar — fixed to right edge, fits between header and bottom */}
         {data && (data.entries.length > 0 || activeLetter) && (
