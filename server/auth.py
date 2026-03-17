@@ -18,6 +18,7 @@ def login():
     users = current_app.config["MEDIA"].get("auth", {}).get("users", [])
     for user in users:
         if user["username"] == username and user["password"] == password:
+            session.clear()
             session["user"] = username
             session.permanent = True
             return jsonify({"ok": True, "username": username})

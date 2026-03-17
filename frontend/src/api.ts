@@ -16,7 +16,7 @@ export function onAuthLost(callback: () => void): () => void {
 
 export async function checkAuth(): Promise<boolean> {
   try {
-    const res = await fetch("/api/auth/check");
+    const res = await fetch("/api/auth/check", { credentials: "include" });
     return res.ok;
   } catch {
     return false;
@@ -26,6 +26,7 @@ export async function checkAuth(): Promise<boolean> {
 export async function login(username: string, password: string): Promise<boolean> {
   const res = await fetch("/api/auth/login", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
   });
