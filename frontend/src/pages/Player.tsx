@@ -54,7 +54,7 @@ export default function Player() {
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [controlsVisible, setControlsVisible] = useState(true);
+  const [controlsVisible, setControlsVisible] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [isSeeking, setIsSeeking] = useState(false);
   const [seekPreview, setSeekPreview] = useState<number | null>(null); // visual preview during drag
@@ -467,8 +467,12 @@ export default function Player() {
 
   // Keep controls visible while paused or settings open
   useEffect(() => {
+    const video = videoRef.current;
     if (paused || settingsOpen) {
-      setControlsVisible(true);
+      // Only force-show controls if video has actually started (not initial load)
+      if (video && video.readyState > 0) {
+        setControlsVisible(true);
+      }
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
     } else {
       scheduleHide();
@@ -718,7 +722,7 @@ export default function Player() {
       {/* Loading overlay */}
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center z-20">
-          <div className="text-gray-400 text-lg">Loading stream...</div>
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-500 border-t-transparent"></div>
         </div>
       )}
 
