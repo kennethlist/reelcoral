@@ -511,6 +511,7 @@ function ImagePageReader({
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [imageLoading, setImageLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 1200, height: 800 });
 
@@ -653,11 +654,20 @@ function ImagePageReader({
       ref={containerRef}
       className={`flex-1 bg-gray-950 ${needsScroll ? "overflow-y-auto overflow-x-hidden" : "flex items-center justify-center overflow-hidden"}`}
     >
+      {imageLoading && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <div className="w-8 h-8 border-2 border-white/30 border-t-white/80 rounded-full animate-spin" />
+        </div>
+      )}
       <img
+        key={`${currentPage}-${imageUrl}`}
         src={imageUrl}
         alt={`Page ${currentPage + 1}`}
-        className={needsScroll ? "w-full" : settings.pdfFit === "height" ? "h-full object-contain" : "max-w-full max-h-full object-contain"}
+        className={`${imageLoading ? "opacity-0" : "opacity-100"} transition-opacity duration-150 ${needsScroll ? "w-full" : settings.pdfFit === "height" ? "h-full object-contain" : "max-w-full max-h-full object-contain"}`}
         draggable={false}
+        onLoadStart={() => setImageLoading(true)}
+        onLoad={() => setImageLoading(false)}
+        onError={() => setImageLoading(false)}
       />
     </div>
   );
@@ -1000,6 +1010,7 @@ export default function Reader() {
   const [pageInputValue, setPageInputValue] = useState("");
   const [isTouch] = useState(() => isTouchDevice());
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sliderDraggingRef = useRef(false);
   const suppressShowUntilRef = useRef(0); // timestamp to suppress showControls after click-toggle
   const containerRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
@@ -1156,8 +1167,8 @@ export default function Reader() {
     if (overControls) {
       // Over controls: keep visible, don't schedule hide
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
-    } else {
-      // Over empty area: schedule auto-hide
+    } else if (!sliderDraggingRef.current) {
+      // Over empty area: schedule auto-hide (skip if slider is being dragged)
       if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
       hideTimerRef.current = setTimeout(() => {
         if (!settingsOpen && !pageInputFocused) setControlsVisible(false);
@@ -1452,6 +1463,7 @@ export default function Reader() {
                 onPointerDown={(e) => {
                   const track = e.currentTarget;
                   track.setPointerCapture(e.pointerId);
+                  sliderDraggingRef.current = true;
                   const update = (cx: number) => {
                     const rect = track.getBoundingClientRect();
                     const ratio = Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
@@ -1466,6 +1478,7 @@ export default function Reader() {
                     update(ev.clientX);
                   };
                   const onUp = () => {
+                    sliderDraggingRef.current = false;
                     track.removeEventListener("pointermove", onMove);
                     track.removeEventListener("pointerup", onUp);
                     track.removeEventListener("pointercancel", onUp);

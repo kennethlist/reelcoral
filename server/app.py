@@ -22,7 +22,7 @@ def create_app():
     app = Flask(__name__, static_folder=None)
     app.secret_key = config["server"]["secret"]
     app.permanent_session_lifetime = timedelta(days=365)
-    app.config["SESSION_COOKIE_SECURE"] = True
+    app.config["SESSION_COOKIE_SECURE"] = False
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["MEDIA"] = config

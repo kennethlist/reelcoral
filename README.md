@@ -49,7 +49,7 @@ A self-hosted media server for streaming video, music, books, and images through
 |-------|-----------|
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS, HLS.js |
 | Backend | Python, Flask, Gunicorn (gevent) |
-| Reverse Proxy | Nginx with auto-generated self-signed TLS |
+| Reverse Proxy | Nginx |
 | Transcoding | FFmpeg with VAAPI/QSV hardware acceleration |
 | Books | ebooklib (EPUB), PyMuPDF (PDF), rarfile (CBR), zipfile (CBZ) |
 | Fonts | Self-hosted webfonts (Liberation, Ubuntu, Noto, Roboto, DejaVu) |
@@ -73,7 +73,7 @@ A self-hosted media server for streaming video, music, books, and images through
    docker-compose up -d
    ```
 
-5. Access at `https://localhost:8080` (self-signed certificate)
+5. Access at `http://localhost:8080`
 
 ### Manual Setup
 
