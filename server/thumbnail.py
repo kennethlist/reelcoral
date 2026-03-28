@@ -80,7 +80,7 @@ def _generate_book_thumbnail(book_path, cache_path):
             return _generate_epub_thumbnail(book_path, cache_path)
         elif ext == ".pdf":
             return _generate_pdf_thumbnail(book_path, cache_path)
-        elif ext in (".cbr", ".cbz"):
+        elif ext in (".cbr", ".cbz", ".zip"):
             return _generate_comic_thumbnail(book_path, cache_path)
     except Exception as e:
         log.warning("Book thumbnail generation failed for %s: %s", book_path, e)
@@ -166,7 +166,7 @@ def _generate_comic_thumbnail(comic_path, cache_path):
     names = []
     data = None
 
-    if ext == ".cbz":
+    if ext in (".cbz", ".zip"):
         with zipfile.ZipFile(comic_path, "r") as zf:
             for name in zf.namelist():
                 if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
