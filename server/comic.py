@@ -39,7 +39,7 @@ def _get_comic_pages(abs_path):
     ext = os.path.splitext(abs_path)[1].lower()
     names = []
 
-    if ext == ".cbz":
+    if ext in (".cbz", ".zip"):
         with zipfile.ZipFile(abs_path, "r") as zf:
             for name in zf.namelist():
                 if os.path.splitext(name)[1].lower() in IMAGE_EXTS and not os.path.basename(name).startswith("."):
@@ -59,7 +59,7 @@ def _read_comic_page(abs_path, page_name):
     """Read a single page image from the archive."""
     ext = os.path.splitext(abs_path)[1].lower()
 
-    if ext == ".cbz":
+    if ext in (".cbz", ".zip"):
         with zipfile.ZipFile(abs_path, "r") as zf:
             return zf.read(page_name)
     elif ext == ".cbr":

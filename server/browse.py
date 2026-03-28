@@ -10,7 +10,7 @@ browse_bp = Blueprint("browse", __name__)
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 AUDIO_EXTS = {".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus"}
 EBOOK_EXTS = {".epub", ".pdf"}
-COMIC_EXTS = {".cbr", ".cbz"}
+COMIC_EXTS = {".cbr", ".cbz", ".zip"}
 MARKDOWN_EXTS = {".md"}
 COVER_ART_NAMES = {"cover.jpg", "folder.jpg", "front.jpg", "album.jpg", "art.jpg",
                    "cover.png", "folder.png", "front.png", "album.png", "art.png"}

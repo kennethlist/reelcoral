@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 
 CACHE_DIR = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
-BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz"}
+BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz", ".zip"}
 
 
 def cache_path_for(path_hash):

@@ -31,6 +31,7 @@ function detectFormat(path: string): FileFormat {
   if (ext === "pdf") return "pdf";
   if (ext === "cbr") return "cbr";
   if (ext === "cbz") return "cbz";
+  if (ext === "zip") return "cbz";
   if (ext === "md") return "md";
   return "pdf";
 }

@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 OVERRIDES_FILE = os.path.join(os.path.dirname(CACHE_DIR), "thumbnail_overrides.json")
 CANDIDATE_POSITIONS = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 MAX_DIR_SCAN = 5000  # stop scanning after this many files to keep it fast
-BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz"}
+BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz", ".zip"}
 
 
 def _load_overrides():
