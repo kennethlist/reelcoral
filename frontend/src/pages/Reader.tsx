@@ -18,6 +18,12 @@ import {
   setFileStatus,
 } from "../api";
 import { usePreferences } from "../hooks/usePreferences";
+import {
+  extractTextAndImageInfo,
+  buildFontString,
+  computeMaxWidth,
+  predictPageCount,
+} from "../utils/pretextPredictor";
 
 function isTouchDevice() {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -163,6 +169,9 @@ function EpubReader({
   // Defer column CSS so the loading overlay can paint before expensive layout begins.
   const [columnsReady, setColumnsReady] = useState(false);
 
+  // Pretext prediction data — cached across resizes and settings changes.
+  const chapterDataRef = useRef<{ texts: string[]; imageHeights: number[] } | null>(null);
+
   // Load chapters progressively: show chapter 0 immediately, continue in background
   useEffect(() => {
     let cancelled = false;
@@ -198,6 +207,38 @@ function EpubReader({
       // rather than the closure-captured initialPosition which may be stale.
       const saved = _positionMap[path] || initialPosition;
       console.log("[EpubReader] chapters loaded, restore position:", { path, saved, _positionMap: { ..._positionMap }, initialPosition, navMode: settings.navMode });
+
+      // Extract text for pretext prediction and cache it
+      const texts: string[] = [];
+      const imgHeights: number[] = [];
+      for (const partHtml of parts) {
+        const { text, estimatedImageHeight } = extractTextAndImageInfo(partHtml);
+        texts.push(text);
+        imgHeights.push(estimatedImageHeight);
+      }
+      chapterDataRef.current = { texts, imageHeights: imgHeights };
+
+      // Predict page count before DOM layout for faster position restore
+      const wrapperEl = wrapperRef.current;
+      if (wrapperEl && settings.navMode === "page") {
+        const containerW = wrapperEl.clientWidth;
+        const containerH = wrapperEl.clientHeight;
+        if (containerW > 0 && containerH > 0) {
+          const font = buildFontString(settings.epubFontSize, settings.epubFontFamily, settings.epubFontWeight);
+          const maxW = computeMaxWidth(containerW, settings.epubMargin, true);
+          const lineHeightPx = settings.epubFontSize * settings.epubLineHeight;
+          const predicted = predictPageCount(texts, imgHeights, font, maxW, lineHeightPx, containerH);
+          console.log("[EpubReader] pretext predicted pages:", predicted);
+          setTotalPages(predicted);
+          if (saved?.progress != null) {
+            progressRef.current = saved.progress;
+            const predictedPage = Math.round(saved.progress * (predicted - 1));
+            setCurrentPage(predictedPage);
+            console.log("[EpubReader] pretext restored position:", { predictedPage, progress: saved.progress });
+          }
+        }
+      }
+
       const fullHtml = parts.join('<hr class="epub-chapter-break" />');
       setHtml(fullHtml);
       setFullyLoaded(true);
@@ -214,9 +255,9 @@ function EpubReader({
           requestAnimationFrame(() => setContentReady(true));
         });
       } else if (settings.navMode === "page" && saved?.progress != null) {
-        console.log("[EpubReader] page mode restore: waiting for countPages");
+        console.log("[EpubReader] page mode restore: predicted, showing content early");
         setLoading(false);
-        // contentReady will be set after countPages runs
+        setContentReady(true); // Show content immediately with predicted position
       } else {
         console.log("[EpubReader] no position to restore, saved:", saved);
         setLoading(false);
@@ -269,13 +310,30 @@ function EpubReader({
     return () => clearTimeout(t);
   }, [html, loading, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, settings.navMode, measureSize]);
 
+  // Synchronous page prediction using pretext — provides instant feedback on resize/settings changes.
+  const predictPages = useCallback(() => {
+    if (!wrapperRef.current || settings.navMode !== "page" || !chapterDataRef.current) return;
+    const containerW = wrapperRef.current.clientWidth;
+    const containerH = wrapperRef.current.clientHeight;
+    if (containerW <= 0 || containerH <= 0) return;
+    const font = buildFontString(settings.epubFontSize, settings.epubFontFamily, settings.epubFontWeight);
+    const maxW = computeMaxWidth(containerW, settings.epubMargin, true);
+    const lineHeightPx = settings.epubFontSize * settings.epubLineHeight;
+    const { texts, imageHeights } = chapterDataRef.current;
+    const predicted = predictPageCount(texts, imageHeights, font, maxW, lineHeightPx, containerH);
+    setTotalPages(predicted);
+    const newPage = Math.min(Math.round(progressRef.current * (predicted - 1)), predicted - 1);
+    setCurrentPage(newPage);
+  }, [settings.navMode, settings.epubFontSize, settings.epubFontFamily, settings.epubFontWeight, settings.epubMargin, settings.epubLineHeight]);
+
   // Recount pages after contentWidth/contentHeight changes or content changes.
   // Use rAF so the browser has applied the column CSS before we measure.
   useEffect(() => {
     if (loading || settings.navMode !== "page" || contentWidth <= 0 || !columnsReady) return;
+    predictPages(); // Instant prediction before DOM measurement
     const id = requestAnimationFrame(() => countPages());
     return () => cancelAnimationFrame(id);
-  }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, columnsReady, countPages]);
+  }, [contentWidth, contentHeight, html, loading, settings.navMode, settings.epubFontSize, settings.epubMargin, settings.epubFontFamily, settings.epubFontWeight, settings.epubLineHeight, columnsReady, countPages, predictPages]);
 
   // Defer column CSS so the loading overlay can paint before expensive layout begins.
   // Double-rAF ensures at least one frame is painted before we trigger column layout.
@@ -299,6 +357,7 @@ function EpubReader({
     let timer: ReturnType<typeof setTimeout> | null = null;
     const onResize = () => {
       if (timer) clearTimeout(timer);
+      predictPages(); // Instant prediction before DOM measurement
       timer = setTimeout(() => measureSize(), 150);
     };
     window.addEventListener("resize", onResize);
