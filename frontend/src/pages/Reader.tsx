@@ -1137,7 +1137,7 @@ export default function Reader() {
   const [allFiles, setAllFiles] = useState<BrowseEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const READER_EXTS = new Set([".epub", ".pdf", ".cbr", ".cbz", ".md"]);
+  const READER_EXTS = new Set([".epub", ".pdf", ".cbr", ".cbz", ".zip", ".md"]);
 
   useEffect(() => {
     if (!currentPath) return;

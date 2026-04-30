@@ -105,7 +105,7 @@ export default function AudioPlayer() {
     if (filePath) setFileStatus(filePath, "opened").catch(() => {});
     const entry = siblings[nextIdx];
     const ext = "." + entry.name.split(".").pop()?.toLowerCase();
-    const readerExts = new Set([".epub", ".pdf", ".cbr", ".cbz", ".md"]);
+    const readerExts = new Set([".epub", ".pdf", ".cbr", ".cbz", ".zip", ".md"]);
     if (entry.is_image) {
       navigate(`/gallery?path=${encodeURIComponent(entry.path)}`, { replace: true });
     } else if (entry.is_audio) {
