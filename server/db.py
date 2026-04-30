@@ -107,6 +107,25 @@ def get_file_statuses(user_id: str, file_paths: list) -> dict:
     return {row["file_path"]: row["status"] for row in rows}
 
 
+def get_dirs_with_descendant_status(user_id: str, dir_paths: list) -> set:
+    """Return the subset of dir_paths that have at least one file_status row
+    matching any descendant file path."""
+    if not dir_paths:
+        return set()
+    db = get_db()
+    matched = set()
+    for d in dir_paths:
+        prefix = d.rstrip("/") + "/"
+        escaped = prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        row = db.execute(
+            "SELECT 1 FROM file_status WHERE user_id=? AND file_path LIKE ? ESCAPE '\\' LIMIT 1",
+            (user_id, escaped + "%"),
+        ).fetchone()
+        if row:
+            matched.add(d)
+    return matched
+
+
 def get_recent_files(user_id: str) -> dict:
     """Get all last_accessed_at timestamps for a user. Returns {path: timestamp}."""
     db = get_db()

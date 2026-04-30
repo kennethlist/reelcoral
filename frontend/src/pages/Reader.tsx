@@ -1192,8 +1192,11 @@ export default function Reader() {
       const next = allFiles[nextIdx];
       const ext = "." + next.name.split(".").pop()?.toLowerCase();
       if (READER_EXTS.has(ext)) {
-        setSearchParams({ path: next.path }, { replace: true });
-        window.location.reload();
+        // Atomic URL update + reload. setSearchParams is deferred through
+        // React Router's state cycle, so calling reload() right after can
+        // race and reload the previous URL — which left "next file" stuck
+        // on the current CBZ.
+        window.location.replace(`${window.location.pathname}?path=${encodeURIComponent(next.path)}`);
       } else if (next.is_image) {
         nav(`/gallery?path=${encodeURIComponent(next.path)}`, { replace: true });
       } else if (next.is_audio) {

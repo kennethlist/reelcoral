@@ -61,6 +61,8 @@ export interface Breadcrumb {
 export interface BrowseResult {
   entries: BrowseEntry[];
   total: number;
+  dir_count: number;
+  file_count: number;
   page: number;
   limit: number;
   breadcrumbs: Breadcrumb[];

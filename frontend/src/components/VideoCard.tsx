@@ -119,7 +119,7 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
     >
       <div className={`${aspectClass} bg-gray-800 relative overflow-hidden flex items-center justify-center`}>
         {/* File status checkmark */}
-        {fileStatus && !entry.is_dir && !musicMode && (
+        {fileStatus && !musicMode && (
           <CheckmarkIcon status={fileStatus} />
         )}
         {thumbUrl && !thumbFailed && (

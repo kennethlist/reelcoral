@@ -188,6 +188,8 @@ def browse():
             entries = [e for e in entries if e["name"] and e["name"][0].upper() == letter.upper()]
 
     total = len(entries)
+    dir_count = sum(1 for e in entries if e["is_dir"])
+    file_count = total - dir_count
     if limit == 0:
         page_entries = entries
     else:
@@ -203,6 +205,15 @@ def browse():
             for e in page_entries:
                 if e["path"] in statuses:
                     e["file_status"] = statuses[e["path"]]
+        # Bubble up: dirs show "opened" if any descendant file has a status.
+        # Skip when listing root so top-level dirs don't always end up marked.
+        if rel_path:
+            dir_paths = [e["path"] for e in page_entries if e["is_dir"]]
+            if dir_paths:
+                bubbled = db.get_dirs_with_descendant_status(user_id, dir_paths)
+                for e in page_entries:
+                    if e["is_dir"] and e["path"] in bubbled:
+                        e["file_status"] = "opened"
 
     # Resolve thumbnail hashes for page entries (skip music context and lite mode)
     thumbnails = {}
@@ -289,6 +300,8 @@ def browse():
     result = {
         "entries": page_entries,
         "total": total,
+        "dir_count": dir_count,
+        "file_count": file_count,
         "page": page,
         "limit": limit,
         "breadcrumbs": breadcrumbs,

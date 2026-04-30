@@ -544,6 +544,17 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           ) : (
             <div className="h-5" />
           )}
+          {data && (data.dir_count > 0 || data.file_count > 0) && (
+            <div className="text-xs text-gray-500 flex-1 text-center">
+              {data.dir_count > 0 && (
+                <span>{data.dir_count} {data.dir_count === 1 ? "folder" : "folders"}</span>
+              )}
+              {data.dir_count > 0 && data.file_count > 0 && <span> · </span>}
+              {data.file_count > 0 && (
+                <span>{data.file_count} {data.file_count === 1 ? "file" : "files"}</span>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 mr-6">
             <span className="text-xs text-gray-500">Sort</span>
             <select
