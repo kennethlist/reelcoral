@@ -609,6 +609,13 @@ function ImagePageReader({
     if (pageCount > 0) {
       onPageInfo(currentPage + 1, pageCount);
       savePosition(path, { page: currentPage });
+      // Reset scroll-to-top when flipping pages so a previous page's scroll
+      // position doesn't carry over (especially across pages with different
+      // aspect ratios, where it can leave you stuck mid-image).
+      if (containerRef.current) {
+        containerRef.current.scrollLeft = 0;
+        containerRef.current.scrollTop = 0;
+      }
     }
   }, [currentPage, pageCount]);
 
@@ -757,6 +764,7 @@ function ImagePageReader({
   return (
     <div
       ref={containerRef}
+      data-reader-scroll
       className={`flex-1 bg-gray-950 relative ${containerClass}`}
     >
       {!displayedUrl && (
@@ -1135,6 +1143,49 @@ export default function Reader() {
   const suppressShowUntilRef = useRef(0); // timestamp to suppress showControls after click-toggle
   const containerRef = useRef<HTMLDivElement>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
+  const touchScrollRef = useRef({ x: 0, y: 0, active: false });
+
+  // The tap zones sit on top of the image scroll container and would otherwise
+  // swallow wheel/touch events. Forward them to whichever container is currently
+  // scrollable so a tall fit-width page or a wide fit-height page can scroll.
+  const handleZoneWheel = useCallback((e: React.WheelEvent) => {
+    const sc = containerRef.current?.querySelector('[data-reader-scroll]') as HTMLElement | null;
+    if (!sc) return;
+    const canX = sc.scrollWidth > sc.clientWidth;
+    const canY = sc.scrollHeight > sc.clientHeight;
+    // If only one axis is scrollable, redirect vertical wheel delta to it so a
+    // normal mouse wheel can pan a horizontally-scrolling landscape page.
+    if (canX && !canY) {
+      sc.scrollLeft += e.deltaY + e.deltaX;
+    } else if (canY && !canX) {
+      sc.scrollTop += e.deltaY + e.deltaX;
+    } else {
+      sc.scrollLeft += e.deltaX;
+      sc.scrollTop += e.deltaY;
+    }
+  }, []);
+  const handleZoneTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 1) {
+      touchScrollRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, active: true };
+    } else {
+      touchScrollRef.current.active = false;
+    }
+  }, []);
+  const handleZoneTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchScrollRef.current.active || e.touches.length !== 1) return;
+    const t = e.touches[0];
+    const dx = touchScrollRef.current.x - t.clientX;
+    const dy = touchScrollRef.current.y - t.clientY;
+    touchScrollRef.current.x = t.clientX;
+    touchScrollRef.current.y = t.clientY;
+    const sc = containerRef.current?.querySelector('[data-reader-scroll]') as HTMLElement | null;
+    if (!sc) return;
+    if (dx) sc.scrollLeft += dx;
+    if (dy) sc.scrollTop += dy;
+  }, []);
+  const handleZoneTouchEnd = useCallback(() => {
+    touchScrollRef.current.active = false;
+  }, []);
 
   const { prefs, setPrefs } = usePreferences();
   const [settings, setSettings] = useState<ReaderSettings>(loadSettings);
@@ -1504,7 +1555,14 @@ export default function Reader() {
       {!settingsOpen && !pageInputFocused && (
         settings.navMode === "page" ? (
           settings.pageDirection === "horseshoe" ? (
-            <div className="absolute inset-0 z-10 grid grid-cols-3 grid-rows-[30%_40%_30%]">
+            <div
+              className="absolute inset-0 z-10 grid grid-cols-3 grid-rows-[30%_40%_30%]"
+              onWheel={handleZoneWheel}
+              onTouchStart={handleZoneTouchStart}
+              onTouchMove={handleZoneTouchMove}
+              onTouchEnd={handleZoneTouchEnd}
+              onTouchCancel={handleZoneTouchEnd}
+            >
               {/* Top row: full width, next */}
               <div
                 className="col-span-3"
@@ -1536,7 +1594,14 @@ export default function Reader() {
               />
             </div>
           ) : (
-            <div className="absolute inset-0 z-10 flex">
+            <div
+              className="absolute inset-0 z-10 flex"
+              onWheel={handleZoneWheel}
+              onTouchStart={handleZoneTouchStart}
+              onTouchMove={handleZoneTouchMove}
+              onTouchEnd={handleZoneTouchEnd}
+              onTouchCancel={handleZoneTouchEnd}
+            >
               <div
                 className="w-1/3 h-full"
                 onClick={() => (window as any).__readerNav?.(settings.pageDirection === "reverse" ? 1 : -1)}
