@@ -672,6 +672,38 @@ function ImagePageReader({
     }
   }, [currentPage, pageCount, path, format, settings.pdfFit, containerSize]);
 
+  // Track current page for the background preloader without restarting it on every flip
+  const currentPageRef = useRef(currentPage);
+  currentPageRef.current = currentPage;
+
+  // Background-preload the whole comic once it's opened, so page switches are instant.
+  // Warms both the browser cache and the server-side extracted-page cache.
+  useEffect(() => {
+    if (format === "pdf" || pageCount <= 0) return;
+    let cancelled = false;
+
+    // Visit pages starting near where the reader is, expanding outward.
+    const start = currentPageRef.current;
+    const order: number[] = [];
+    for (let i = start; i < pageCount; i++) order.push(i);
+    for (let i = start - 1; i >= 0; i--) order.push(i);
+
+    let next = 0;
+    const CONCURRENCY = 3;
+    const loadNext = () => {
+      if (cancelled || next >= order.length) return;
+      const p = order[next++];
+      const img = new Image();
+      const after = () => { if (!cancelled) loadNext(); };
+      img.onload = after;
+      img.onerror = after;
+      img.src = comicPageUrl(path, p, imageMaxWidth);
+    };
+    for (let i = 0; i < CONCURRENCY; i++) loadNext();
+
+    return () => { cancelled = true; };
+  }, [path, pageCount, format, imageMaxWidth]);
+
   if (loading) {
     return <div className="flex-1 flex items-center justify-center text-gray-400">Loading...</div>;
   }

@@ -22,6 +22,10 @@ def _comic_cache_path(abs_path, page, max_width=0):
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
 
+# In-process cache of archive page lists, keyed by abs_path -> (mtime, names).
+# Avoids re-opening and re-scanning the archive on every page request.
+_PAGE_LIST_CACHE = {}
+
 
 def _resolve_path(root, rel_path):
     abs_path = os.path.realpath(os.path.join(root, rel_path.lstrip("/")))
@@ -35,7 +39,12 @@ def _natural_sort_key(s):
 
 
 def _get_comic_pages(abs_path):
-    """Return sorted list of image filenames inside the archive."""
+    """Return sorted list of image filenames inside the archive (cached by mtime)."""
+    mtime = os.path.getmtime(abs_path)
+    cached = _PAGE_LIST_CACHE.get(abs_path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+
     ext = os.path.splitext(abs_path)[1].lower()
     names = []
 
@@ -52,6 +61,7 @@ def _get_comic_pages(abs_path):
                     names.append(name)
 
     names.sort(key=_natural_sort_key)
+    _PAGE_LIST_CACHE[abs_path] = (mtime, names)
     return names
 
 
