@@ -7,3 +7,4 @@ lxml==6.1.0
 rarfile==4.2
 pymupdf==1.25.3
 markdown
+Pillow==12.2.0
