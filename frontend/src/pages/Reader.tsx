@@ -752,7 +752,7 @@ function ImagePageReader({
       ? "w-full h-auto"
       : fitMode === "height"
       ? "h-full w-auto max-w-none block mx-auto"
-      : "max-w-full max-h-full object-contain";
+      : "w-full h-full object-contain";
 
   return (
     <div
