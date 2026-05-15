@@ -101,9 +101,14 @@ def _resize_image_data(data, max_width, quality=85):
         new_size = (max_width, round(img.height * ratio))
         img = img.resize(new_size, PILImage.LANCZOS)
     # JPEG only supports L, RGB, CMYK, YCbCr. Convert anything else (RGBA, LA, P, I, F, 1, ...)
-    # to RGB so the save call doesn't raise "cannot write mode X as JPEG".
+    # to RGB so the save call doesn't raise "cannot write mode X as JPEG". A few premultiplied
+    # modes (La, RGBa) can't go straight to RGB — route them through LA / RGBA first.
     if img.mode not in ("L", "RGB", "CMYK", "YCbCr"):
-        img = img.convert("RGB")
+        try:
+            img = img.convert("RGB")
+        except (ValueError, OSError):
+            intermediate = "LA" if img.mode == "La" else "RGBA"
+            img = img.convert(intermediate).convert("RGB")
     buf = BytesIO()
     img.save(buf, format="JPEG", quality=quality)
     return buf.getvalue()

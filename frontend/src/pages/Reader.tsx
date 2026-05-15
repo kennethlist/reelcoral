@@ -783,7 +783,11 @@ function ImagePageReader({
           className="absolute opacity-0 pointer-events-none"
           draggable={false}
           onLoad={() => setDisplayedUrl(imageUrl)}
-          onError={() => setDisplayedUrl(imageUrl)}
+          onError={() => {
+            // If we already have a working image, keep showing it rather than
+            // promoting a broken URL and flashing the broken-image icon.
+            if (!displayedUrl) setDisplayedUrl(imageUrl);
+          }}
         />
       )}
     </div>
