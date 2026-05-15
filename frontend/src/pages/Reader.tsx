@@ -571,7 +571,7 @@ function ImagePageReader({
   const [pageCount, setPageCount] = useState(0);
   const [currentPage, setCurrentPage] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [imageLoading, setImageLoading] = useState(false);
+  const [displayedUrl, setDisplayedUrl] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const [containerSize, setContainerSize] = useState({ width: 1200, height: 800 });
 
@@ -740,27 +740,44 @@ function ImagePageReader({
   // For fit-width: allow vertical scroll since the page may be taller than viewport
   // For fit-height/fit-page: contain within viewport
   const needsScroll = settings.pdfFit === "width";
+  const imgFitClass = needsScroll
+    ? "w-full"
+    : settings.pdfFit === "height"
+    ? "h-full object-contain"
+    : "max-w-full max-h-full object-contain";
 
   return (
     <div
       ref={containerRef}
       className={`flex-1 bg-gray-950 ${needsScroll ? "overflow-y-auto overflow-x-hidden" : "flex items-center justify-center overflow-hidden"}`}
     >
-      {imageLoading && (
+      {!displayedUrl && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
           <div className="w-8 h-8 border-2 border-white/30 border-t-white/80 rounded-full animate-spin" />
         </div>
       )}
-      <img
-        key={`${currentPage}-${imageUrl}`}
-        src={imageUrl}
-        alt={`Page ${currentPage + 1}`}
-        className={`${imageLoading ? "opacity-0" : "opacity-100"} transition-opacity duration-150 ${needsScroll ? "w-full" : settings.pdfFit === "height" ? "h-full object-contain" : "max-w-full max-h-full object-contain"}`}
-        draggable={false}
-        onLoadStart={() => setImageLoading(true)}
-        onLoad={() => setImageLoading(false)}
-        onError={() => setImageLoading(false)}
-      />
+      {/* Visible page: stays until the next page has fully decoded, so there's no flash. */}
+      {displayedUrl && (
+        <img
+          src={displayedUrl}
+          alt={`Page ${currentPage + 1}`}
+          className={imgFitClass}
+          draggable={false}
+        />
+      )}
+      {/* Next page loads invisibly on top, then is promoted once it's ready. */}
+      {imageUrl !== displayedUrl && (
+        <img
+          key={imageUrl}
+          src={imageUrl}
+          alt=""
+          aria-hidden
+          className="absolute opacity-0 pointer-events-none"
+          draggable={false}
+          onLoad={() => setDisplayedUrl(imageUrl)}
+          onError={() => setDisplayedUrl(imageUrl)}
+        />
+      )}
     </div>
   );
 }
