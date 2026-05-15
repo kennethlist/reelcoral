@@ -93,16 +93,18 @@ def comic_info():
 
 
 def _resize_image_data(data, max_width, quality=85):
-    """Resize image data if wider than max_width. Returns (data, mime)."""
+    """Resize image data if wider than max_width and re-encode as JPEG."""
     from PIL import Image as PILImage
     img = PILImage.open(BytesIO(data))
     if img.width > max_width:
         ratio = max_width / img.width
         new_size = (max_width, round(img.height * ratio))
         img = img.resize(new_size, PILImage.LANCZOS)
-    buf = BytesIO()
-    if img.mode in ("RGBA", "P"):
+    # JPEG only supports L, RGB, CMYK, YCbCr. Convert anything else (RGBA, LA, P, I, F, 1, ...)
+    # to RGB so the save call doesn't raise "cannot write mode X as JPEG".
+    if img.mode not in ("L", "RGB", "CMYK", "YCbCr"):
         img = img.convert("RGB")
+    buf = BytesIO()
     img.save(buf, format="JPEG", quality=quality)
     return buf.getvalue()
 

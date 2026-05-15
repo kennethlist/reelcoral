@@ -737,19 +737,27 @@ function ImagePageReader({
     );
   }
 
-  // For fit-width: allow vertical scroll since the page may be taller than viewport
-  // For fit-height/fit-page: contain within viewport
-  const needsScroll = settings.pdfFit === "width";
-  const imgFitClass = needsScroll
-    ? "w-full"
-    : settings.pdfFit === "height"
-    ? "h-full object-contain"
-    : "max-w-full max-h-full object-contain";
+  // fit-width: scroll vertically if page is taller than viewport.
+  // fit-height: image fills viewport height; scroll horizontally if a landscape page is wider.
+  // fit-page: contain within viewport, no scroll.
+  const fitMode = settings.pdfFit;
+  const containerClass =
+    fitMode === "width"
+      ? "overflow-y-auto overflow-x-hidden"
+      : fitMode === "height"
+      ? "overflow-x-auto overflow-y-hidden"
+      : "flex items-center justify-center overflow-hidden";
+  const imgFitClass =
+    fitMode === "width"
+      ? "w-full h-auto"
+      : fitMode === "height"
+      ? "h-full w-auto max-w-none block mx-auto"
+      : "max-w-full max-h-full object-contain";
 
   return (
     <div
       ref={containerRef}
-      className={`flex-1 bg-gray-950 ${needsScroll ? "overflow-y-auto overflow-x-hidden" : "flex items-center justify-center overflow-hidden"}`}
+      className={`flex-1 bg-gray-950 relative ${containerClass}`}
     >
       {!displayedUrl && (
         <div className="absolute inset-0 flex items-center justify-center z-10">
