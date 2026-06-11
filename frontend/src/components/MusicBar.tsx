@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMusicPlayer } from "../hooks/useMusicPlayer";
+import { useMusicPlayer, useMusicTime } from "../hooks/useMusicPlayer";
 import { mediaUrl } from "../api";
 
 function formatTime(s: number): string {
@@ -18,8 +18,6 @@ export default function MusicBar() {
     playlist,
     currentIndex,
     isPlaying,
-    currentTime,
-    duration,
     volume,
     isVisible,
     audioProfile,
@@ -33,6 +31,7 @@ export default function MusicBar() {
     setAudioProfile,
     dismiss,
   } = useMusicPlayer();
+  const { currentTime, duration } = useMusicTime();
 
   const [showQuality, setShowQuality] = useState(false);
   const [showVolume, setShowVolume] = useState(false);

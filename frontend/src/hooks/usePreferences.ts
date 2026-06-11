@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { getConfig, getUserPreferences, saveUserPreferences } from "../api";
 
 export type SubtitleFontSize = "small" | "medium" | "large" | "extra-large";
@@ -43,8 +43,25 @@ function load(defaults: Preferences): Preferences {
 
 export function usePreferences() {
   const [prefs, setPrefsState] = useState<Preferences>(() => load(hardcodedDefaults));
+  const prefsRef = useRef(prefs);
+  // Keys the user changed locally since mount; these win over the async load
+  const dirtyKeysRef = useRef<Set<keyof Preferences>>(new Set());
 
   useEffect(() => {
+    prefsRef.current = prefs;
+  }, [prefs]);
+
+  useEffect(() => {
+    // Apply a loaded preference set, but keep any keys the user changed in the meantime
+    const applyLoaded = (loaded: Preferences): Preferences => {
+      const result = { ...loaded };
+      for (const key of dirtyKeysRef.current) {
+        (result as Record<string, unknown>)[key] = prefsRef.current[key];
+      }
+      setPrefsState(result);
+      return result;
+    };
+
     // Load server defaults from config, then overlay server-saved preferences
     getConfig()
       .then((cfg) => {
@@ -67,28 +84,33 @@ export function usePreferences() {
         getUserPreferences()
           .then((serverPrefs) => {
             if (serverPrefs && Object.keys(serverPrefs).length > 0) {
-              const merged = { ...localPrefs, ...serverPrefs } as Preferences;
-              setPrefsState(merged);
-              localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+              const merged = applyLoaded({ ...localPrefs, ...serverPrefs } as Preferences);
+              try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+              } catch {}
             } else {
-              setPrefsState(localPrefs);
+              applyLoaded(localPrefs);
             }
           })
           .catch(() => {
-            setPrefsState(localPrefs);
+            applyLoaded(localPrefs);
           });
       })
       .catch(() => {});
   }, []);
 
   const setPrefs = useCallback((update: Partial<Preferences>) => {
-    setPrefsState((prev) => {
-      const next = { ...prev, ...update };
+    const next = { ...prefsRef.current, ...update };
+    prefsRef.current = next;
+    for (const key of Object.keys(update)) {
+      dirtyKeysRef.current.add(key as keyof Preferences);
+    }
+    setPrefsState(next);
+    try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-      // Fire-and-forget save to server
-      saveUserPreferences(next).catch(() => {});
-      return next;
-    });
+    } catch {}
+    // Fire-and-forget save to server
+    saveUserPreferences(next).catch(() => {});
   }, []);
 
   return { prefs, setPrefs };

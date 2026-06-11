@@ -18,7 +18,12 @@ def get_preferences():
 @userdata_bp.route("/preferences", methods=["PUT"])
 def save_preferences():
     body = request.get_json(silent=True) or {}
-    db.save_preferences(_user_id(), json.dumps(body))
+    # Merge instead of replace: some callers PUT single keys (e.g. the music
+    # player sends {music_volume}), which would otherwise wipe all other
+    # saved preferences.
+    existing = json.loads(db.get_preferences(_user_id()))
+    existing.update(body)
+    db.save_preferences(_user_id(), json.dumps(existing))
     return jsonify({"ok": True})
 
 

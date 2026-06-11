@@ -68,6 +68,14 @@ export default function Player() {
   // Track whether we've marked this file as completed
   const completedRef = useRef(false);
 
+  // Refs mirroring info/filePath for the once-registered video listeners —
+  // the previous closure captured info=null forever, so the 95% auto-complete
+  // never fired (and after sibling navigation would have marked the wrong file).
+  const infoRef = useRef<MediaInfo | null>(null);
+  const filePathRef = useRef(filePath);
+  useEffect(() => { infoRef.current = info; }, [info]);
+  useEffect(() => { filePathRef.current = filePath; }, [filePath]);
+
   // Burn-in subtitle index: only meaningful when burning in on a non-original profile
   const burnSubIdx = subMode === "burn" && profile !== "original" ? subIdx : null;
 
@@ -87,20 +95,30 @@ export default function Player() {
     }
   }, []);
 
-  // Reset completed tracking when file changes
+  // Reset per-file state when the file changes. Clearing info/audioIdx/subIdx
+  // matters for subtitle sync: without it, sibling navigation fired the
+  // stream effect immediately with the PREVIOUS file's track indices (a
+  // possibly wrong/nonexistent audio or burn-in subtitle track), then again
+  // when the new media info arrived — a double transcode start with a
+  // mis-subtitled first stream.
   useEffect(() => {
     completedRef.current = false;
     setSeekTarget(null);
     seekOffsetRef.current = 0;
     subOffsetRef.current = 0;
     setCurrentTime(0);
+    setInfo(null);
+    setAudioIdx(null);
+    setSubIdx(null);
     if (filePath) setFileStatus(filePath, "opened").catch(() => {});
   }, [filePath]);
 
   // Load media info
   useEffect(() => {
     if (!filePath) return;
+    let cancelled = false;
     getMediaInfo(filePath).then((data) => {
+      if (cancelled) return; // out-of-order response for a previous file
       setInfo(data);
       const preferredAudio = data.audio_tracks.find(
         (t) => t.lang === prefs.preferred_audio_lang
@@ -128,7 +146,8 @@ export default function Player() {
         }
         setSubIdx(bestSub?.index ?? null);
       }
-    }).catch(() => setError("Failed to load media info"));
+    }).catch(() => { if (!cancelled) setError("Failed to load media info"); });
+    return () => { cancelled = true; };
   }, [filePath]);
 
   // Load sibling files from parent directory for next/prev navigation,
@@ -187,6 +206,10 @@ export default function Player() {
   useEffect(() => {
     if (!info || audioIdx === null) return;
     let cancelled = false;
+    // Tracks an HLS instance created but not yet promoted to hlsRef —
+    // it must be destroyed if the effect is cancelled before MANIFEST_PARSED,
+    // or it keeps downloading segments unreferenced.
+    let pendingHls: Hls | null = null;
     setLoading(true);
     setError("");
 
@@ -210,6 +233,29 @@ export default function Player() {
         const video = videoRef.current;
         if (!video) return;
 
+        // Calibrate stream-position → file-time offsets from BUFFERED DATA,
+        // not event timing. buffered.start(0) is the exact stream position
+        // of the first sample (copy-mode MPEGTS streams start at a non-zero
+        // PTS — ~1.4s mux offset — and the first sample corresponds to file
+        // time actualStart). The old approach sampled video.currentTime
+        // inside the 'playing' handler and assumed playback had begun
+        // exactly at the first sample; after a scrub, the gap-jump from 0
+        // to the first buffered position can complete AFTER 'playing'
+        // fires, which baked a ~1.5s error into external subtitle timing
+        // for the rest of the session.
+        const calibrateOffsets = () => {
+          const epoch = video.buffered.length > 0 ? video.buffered.start(0) : video.currentTime;
+          // Both offsets anchor to actualStart — the TRUE file time of the
+          // first sample. Copy-mode seeks land on the container's cue point,
+          // which can be many seconds before the requested time; anchoring
+          // the displayed time to the request (the old behavior) made the
+          // seek bar lie by that gap, so subtitles looked desynced against
+          // the bar even though they matched the content. seekPreview keeps
+          // showing the requested target until playback starts.
+          seekOffsetRef.current = actualStart - epoch;
+          subOffsetRef.current = actualStart - epoch;
+        };
+
         if (Hls.isSupported()) {
           const isOriginal = profile === "original";
           const newHls = new Hls({
@@ -217,6 +263,7 @@ export default function Player() {
             maxMaxBufferLength: isOriginal ? 30 : 60,
             startPosition: 0,
           });
+          pendingHls = newHls;
 
           // Make-before-break: load source without attaching to video yet
           newHls.loadSource(sess.playlist);
@@ -244,7 +291,11 @@ export default function Player() {
           });
 
           newHls.on(Hls.Events.MANIFEST_PARSED, () => {
-            if (cancelled) return;
+            if (cancelled) {
+              newHls.destroy();
+              pendingHls = null;
+              return;
+            }
             // Tear down old HLS now that the new one is ready
             if (oldHls) {
               oldHls.detachMedia();
@@ -254,20 +305,24 @@ export default function Player() {
             // Attach new HLS and start playing
             newHls.attachMedia(video);
             hlsRef.current = newHls;
+            pendingHls = null;
             setLoading(false);
-            // Calibrate offsets once playback actually starts, then clear
-            // the seek preview so displayTime switches to the real value.
-            // Both offsets are set relative to video.currentTime so they
-            // correctly compensate for any non-zero initial PTS (e.g.
-            // copy-mode MPEGTS streams where currentTime doesn't start at 0).
+            // Calibrate as soon as the first frame is buffered, and again on
+            // 'playing' (idempotent — both read buffered.start(0)). Clear the
+            // seek preview only once playback actually starts. once-only and
+            // cancelled-guarded: a leftover listener from a superseded stream
+            // must not calibrate the next stream with stale values.
+            const onLoadedData = () => {
+              if (!cancelled) calibrateOffsets();
+            };
+            video.addEventListener("loadeddata", onLoadedData, { once: true });
             const onPlaying = () => {
-              seekOffsetRef.current = startAt - video.currentTime;
-              subOffsetRef.current = actualStart - video.currentTime;
+              if (cancelled) return;
+              calibrateOffsets();
               setCurrentTime(video.currentTime);
               setSeekPreview(null);
-              video.removeEventListener("playing", onPlaying);
             };
-            video.addEventListener("playing", onPlaying);
+            video.addEventListener("playing", onPlaying, { once: true });
             video.play().catch(() => {});
           });
         } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -279,18 +334,25 @@ export default function Player() {
           }
           setSubText("");
           video.src = sess.playlist;
+          // { once: true } — these listeners used to accumulate on the
+          // persistent <video> across stream restarts, re-running stale
+          // offset calibrations with old startAt/actualStart closures.
           video.addEventListener("loadedmetadata", () => {
+            if (cancelled) return;
             setLoading(false);
+            const onLoadedData = () => {
+              if (!cancelled) calibrateOffsets();
+            };
+            video.addEventListener("loadeddata", onLoadedData, { once: true });
             const onPlaying = () => {
-              seekOffsetRef.current = startAt - video.currentTime;
-              subOffsetRef.current = actualStart - video.currentTime;
+              if (cancelled) return;
+              calibrateOffsets();
               setCurrentTime(video.currentTime);
               setSeekPreview(null);
-              video.removeEventListener("playing", onPlaying);
             };
-            video.addEventListener("playing", onPlaying);
+            video.addEventListener("playing", onPlaying, { once: true });
             video.play().catch(() => {});
-          });
+          }, { once: true });
         }
       } catch {
         if (!cancelled) {
@@ -302,6 +364,10 @@ export default function Player() {
 
     return () => {
       cancelled = true;
+      if (pendingHls && pendingHls !== hlsRef.current) {
+        pendingHls.destroy();
+        pendingHls = null;
+      }
     };
   }, [info, profile, audioIdx, burnSubIdx, filePath, seekTarget]);
 
@@ -333,6 +399,19 @@ export default function Player() {
   useEffect(() => {
     return () => { destroySession(); };
   }, [destroySession]);
+
+  // Stop the server transcode when the tab/window closes — React unmount
+  // never runs in that case, and the session would otherwise keep ffmpeg
+  // running until the server's idle timeout.
+  useEffect(() => {
+    const onPageHide = () => {
+      if (sessionRef.current) {
+        navigator.sendBeacon(`/api/stream/${sessionRef.current}/stop`);
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, []);
 
 
   // Calculate the letterbox offset so subtitles sit above the video bottom
@@ -411,10 +490,10 @@ export default function Player() {
       }
       // Auto-complete at 95% of duration
       const absTime = seekOffsetRef.current + video.currentTime;
-      const dur = info?.duration ?? 0;
+      const dur = infoRef.current?.duration ?? 0;
       if (dur > 0 && absTime >= dur * 0.95 && !completedRef.current) {
         completedRef.current = true;
-        setFileStatus(filePath, "completed").catch(() => {});
+        setFileStatus(filePathRef.current, "completed").catch(() => {});
       }
     };
     const onPlay = () => setPaused(false);
@@ -542,6 +621,10 @@ export default function Player() {
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Don't hijack keys from focused form controls (volume slider,
+      // quality/track selects) — arrows there must adjust the control,
+      // not navigate to another file.
+      if ((e.target as HTMLElement).closest("input, select, textarea")) return;
       const video = videoRef.current;
       if (!video) return;
       if (e.key === " " || e.key === "k") {

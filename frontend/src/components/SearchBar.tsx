@@ -13,6 +13,13 @@ export default function SearchBar({ value, onChange }: Props) {
     setLocal(value);
   }, [value]);
 
+  // Clear pending debounce on unmount so onChange doesn't fire after navigation
+  useEffect(() => {
+    return () => {
+      if (timer.current) clearTimeout(timer.current);
+    };
+  }, []);
+
   function handleChange(v: string) {
     setLocal(v);
     clearTimeout(timer.current);

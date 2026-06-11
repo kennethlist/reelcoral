@@ -6,7 +6,7 @@ download_bp = Blueprint("download", __name__)
 
 def _resolve_path(root, rel_path):
     abs_path = os.path.realpath(os.path.join(root, rel_path.lstrip("/")))
-    if not abs_path.startswith(os.path.realpath(root)):
+    if not abs_path.startswith(os.path.realpath(root) + os.sep):
         return None
     return abs_path
 

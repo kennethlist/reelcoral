@@ -1,21 +1,59 @@
+import os
 import json
+import threading
 import subprocess
+from collections import OrderedDict
 from flask import Blueprint, request, jsonify, current_app
+
+from offload import singleflight
 
 probe_bp = Blueprint("probe", __name__)
 
+# (path, mtime)-keyed LRU of probe results. A single /stream/start used to
+# spawn ffprobe up to 4 times for the same unchanged file; thumbnails and
+# /media/info re-probe it again.
+_CACHE = OrderedDict()
+_CACHE_LOCK = threading.Lock()
+_CACHE_MAX = 256
+
 
 def ffprobe(filepath):
-    cmd = [
-        "ffprobe", "-v", "quiet",
-        "-print_format", "json",
-        "-show_format", "-show_streams",
-        filepath
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-    if result.returncode != 0:
-        return None
-    return json.loads(result.stdout)
+    try:
+        mtime = os.path.getmtime(filepath)
+    except OSError:
+        mtime = 0
+    key = (filepath, mtime)
+
+    with _CACHE_LOCK:
+        if key in _CACHE:
+            _CACHE.move_to_end(key)
+            return _CACHE[key]
+
+    def do_probe():
+        with _CACHE_LOCK:
+            if key in _CACHE:
+                return _CACHE[key]
+        cmd = [
+            "ffprobe", "-v", "quiet",
+            "-print_format", "json",
+            "-show_format", "-show_streams",
+            filepath
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            return None
+        try:
+            data = json.loads(result.stdout)
+        except ValueError:
+            return None
+        if data is not None:
+            with _CACHE_LOCK:
+                _CACHE[key] = data
+                while len(_CACHE) > _CACHE_MAX:
+                    _CACHE.popitem(last=False)
+        return data
+
+    return singleflight(("ffprobe", key), do_probe)
 
 
 def get_media_info(filepath, config):
@@ -88,7 +126,7 @@ def info():
     root = config["media"]["root"]
     import os
     filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))
-    if not filepath.startswith(os.path.realpath(root)):
+    if not filepath.startswith(os.path.realpath(root) + os.sep):
         return jsonify({"error": "forbidden"}), 403
     if not os.path.isfile(filepath):
         return jsonify({"error": "not found"}), 404

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useRef, useCallback, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { audioUrl, getConfig, saveUserPreferences, mediaUrl } from "../api";
 
 export interface MusicTrack {
@@ -12,17 +12,19 @@ interface MusicPlayerState {
   playlist: MusicTrack[];
   currentIndex: number;
   isPlaying: boolean;
-  currentTime: number;
-  duration: number;
   volume: number;
   isVisible: boolean;
   audioProfile: string;
   availableProfiles: { name: string; bitrate?: string }[];
 }
 
+interface MusicTimeState {
+  currentTime: number;
+  duration: number;
+}
+
 interface MusicPlayerActions {
   playAll: (tracks: MusicTrack[], startIndex?: number) => void;
-  playSingle: (track: MusicTrack) => void;
   pause: () => void;
   resume: () => void;
   next: () => void;
@@ -37,13 +39,20 @@ type MusicPlayerContextType = MusicPlayerState & MusicPlayerActions;
 
 const MusicPlayerContext = createContext<MusicPlayerContextType | null>(null);
 
+// Separate context for fast-changing time values so timeupdate (~4x/s)
+// only re-renders components that actually display time.
+const MusicTimeContext = createContext<MusicTimeState | null>(null);
+
 const VOLUME_KEY = "rc-music-volume";
 const PROFILE_KEY = "rc-music-profile";
 
 function loadVolume(): number {
   try {
     const v = localStorage.getItem(VOLUME_KEY);
-    if (v !== null) return Math.max(0, Math.min(1, parseFloat(v)));
+    if (v !== null) {
+      const parsed = parseFloat(v);
+      if (Number.isFinite(parsed)) return Math.max(0, Math.min(1, parsed));
+    }
   } catch {}
   return 1;
 }
@@ -67,7 +76,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   const [isVisible, setIsVisible] = useState(false);
   const [audioProfile, setAudioProfileState] = useState(loadProfile);
   const [availableProfiles, setAvailableProfiles] = useState<{ name: string; bitrate?: string }[]>([]);
-  const [autoAdvance, setAutoAdvance] = useState(false);
 
   // Load available profiles from config
   useEffect(() => {
@@ -77,15 +85,29 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const currentTrack = playlist[currentIndex] || null;
+  const prevSrcTrackRef = useRef<string | null>(null);
 
   // Update audio src when track or profile changes
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !currentTrack) return;
+    const sameTrack = prevSrcTrackRef.current === currentTrack.path;
+    prevSrcTrackRef.current = currentTrack.path;
+    // If only the profile changed, preserve the playback position
+    const resumeAt = sameTrack ? audio.currentTime : 0;
     const url = audioUrl(currentTrack.path, audioProfile);
     const wasPlaying = isPlaying;
     audio.src = url;
     audio.volume = volume;
+    if (resumeAt > 0) {
+      audio.addEventListener(
+        "loadedmetadata",
+        () => {
+          audio.currentTime = resumeAt;
+        },
+        { once: true }
+      );
+    }
     if (wasPlaying) {
       audio.play().catch(() => {});
     }
@@ -108,19 +130,6 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     ensureProfiles();
     setPlaylist(tracks);
     setCurrentIndex(startIndex);
-    setAutoAdvance(true);
-    setIsVisible(true);
-    setIsPlaying(true);
-    setTimeout(() => {
-      audioRef.current?.play().catch(() => {});
-    }, 50);
-  }, [ensureProfiles]);
-
-  const playSingle = useCallback((track: MusicTrack) => {
-    ensureProfiles();
-    setPlaylist([track]);
-    setCurrentIndex(0);
-    setAutoAdvance(false);
     setIsVisible(true);
     setIsPlaying(true);
     setTimeout(() => {
@@ -139,18 +148,17 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const next = useCallback(() => {
-    setCurrentIndex((i) => {
-      const nextIdx = i + 1;
-      if (nextIdx >= playlist.length) {
-        // Stop at end of playlist
-        setIsPlaying(false);
-        return i;
-      }
-      return nextIdx;
-    });
+    const nextIdx = currentIndex + 1;
+    if (nextIdx >= playlist.length) {
+      // Stop at end of playlist
+      audioRef.current?.pause();
+      setIsPlaying(false);
+      return;
+    }
+    setCurrentIndex(nextIdx);
     setIsPlaying(true);
     setTimeout(() => audioRef.current?.play().catch(() => {}), 50);
-  }, [playlist.length]);
+  }, [currentIndex, playlist.length]);
 
   const prev = useCallback(() => {
     const audio = audioRef.current;
@@ -159,10 +167,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
       audio.currentTime = 0;
       return;
     }
-    setCurrentIndex((i) => Math.max(0, i - 1));
+    if (currentIndex <= 0) {
+      // Already at the first track: restart it without forcing playback
+      if (audio) audio.currentTime = 0;
+      return;
+    }
+    setCurrentIndex(currentIndex - 1);
     setIsPlaying(true);
     setTimeout(() => audioRef.current?.play().catch(() => {}), 50);
-  }, []);
+  }, [currentIndex]);
 
   const seekTo = useCallback((time: number) => {
     if (audioRef.current) audioRef.current.currentTime = time;
@@ -170,19 +183,27 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 
   const setVolume = useCallback((vol: number) => {
     setVolumeState(vol);
-    localStorage.setItem(VOLUME_KEY, String(vol));
+    try {
+      localStorage.setItem(VOLUME_KEY, String(vol));
+    } catch {}
     saveUserPreferences({ music_volume: vol }).catch(() => {});
   }, []);
 
   const setAudioProfile = useCallback((profile: string) => {
     setAudioProfileState(profile);
-    localStorage.setItem(PROFILE_KEY, profile);
+    try {
+      localStorage.setItem(PROFILE_KEY, profile);
+    } catch {}
     saveUserPreferences({ music_profile: profile }).catch(() => {});
   }, []);
 
   const dismiss = useCallback(() => {
     audioRef.current?.pause();
-    if (audioRef.current) audioRef.current.src = "";
+    if (audioRef.current) {
+      audioRef.current.removeAttribute("src");
+      audioRef.current.load();
+    }
+    prevSrcTrackRef.current = null;
     setIsPlaying(false);
     setIsVisible(false);
     setPlaylist([]);
@@ -221,6 +242,15 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
         audioRef.current.currentTime = details.seekTime;
       }
     });
+
+    return () => {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.setActionHandler("play", null);
+      navigator.mediaSession.setActionHandler("pause", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("seekto", null);
+    };
   }, [currentTrack?.path, currentTrack?.name, currentTrack?.albumName, currentTrack?.coverArt, next, prev]);
 
   // MediaSession playback state
@@ -243,12 +273,8 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     }
   }, [currentTime, duration]);
 
-  // Auto-advance on track end (only when playAll was used)
+  // Auto-advance to the next track when one ends
   const handleEnded = useCallback(() => {
-    if (!autoAdvance) {
-      setIsPlaying(false);
-      return;
-    }
     const nextIdx = currentIndex + 1;
     if (nextIdx < playlist.length) {
       setCurrentIndex(nextIdx);
@@ -256,7 +282,7 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     } else {
       setIsPlaying(false);
     }
-  }, [currentIndex, playlist.length, autoAdvance]);
+  }, [currentIndex, playlist.length]);
 
   const handleTimeUpdate = useCallback(() => {
     if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
@@ -266,41 +292,62 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
     if (audioRef.current) setDuration(audioRef.current.duration || 0);
   }, []);
 
+  const contextValue = useMemo<MusicPlayerContextType>(
+    () => ({
+      playlist,
+      currentIndex,
+      isPlaying,
+      volume,
+      isVisible,
+      audioProfile,
+      availableProfiles,
+      playAll,
+      pause,
+      resume,
+      next,
+      prev,
+      seekTo,
+      setVolume,
+      setAudioProfile,
+      dismiss,
+    }),
+    [
+      playlist,
+      currentIndex,
+      isPlaying,
+      volume,
+      isVisible,
+      audioProfile,
+      availableProfiles,
+      playAll,
+      pause,
+      resume,
+      next,
+      prev,
+      seekTo,
+      setVolume,
+      setAudioProfile,
+      dismiss,
+    ]
+  );
+
+  const timeValue = useMemo<MusicTimeState>(() => ({ currentTime, duration }), [currentTime, duration]);
+
   return (
-    <MusicPlayerContext.Provider
-      value={{
-        playlist,
-        currentIndex,
-        isPlaying,
-        currentTime,
-        duration,
-        volume,
-        isVisible,
-        audioProfile,
-        availableProfiles,
-        playAll,
-        playSingle,
-        pause,
-        resume,
-        next,
-        prev,
-        seekTo,
-        setVolume,
-        setAudioProfile,
-        dismiss,
-      }}
-    >
-      {children}
-      <audio
-        ref={audioRef}
-        onEnded={handleEnded}
-        onTimeUpdate={handleTimeUpdate}
-        onDurationChange={handleDurationChange}
-        onPlay={() => setIsPlaying(true)}
-        onPause={() => setIsPlaying(false)}
-        preload="auto"
-        style={{ display: "none" }}
-      />
+    <MusicPlayerContext.Provider value={contextValue}>
+      <MusicTimeContext.Provider value={timeValue}>
+        {children}
+        <audio
+          ref={audioRef}
+          onEnded={handleEnded}
+          onTimeUpdate={handleTimeUpdate}
+          onDurationChange={handleDurationChange}
+          onPlay={() => setIsPlaying(true)}
+          onPause={() => setIsPlaying(false)}
+          preload="auto"
+          style={{ display: "none" }}
+        />
+      </MusicTimeContext.Provider>
     </MusicPlayerContext.Provider>
   );
 }
@@ -308,5 +355,11 @@ export function MusicPlayerProvider({ children }: { children: ReactNode }) {
 export function useMusicPlayer(): MusicPlayerContextType {
   const ctx = useContext(MusicPlayerContext);
   if (!ctx) throw new Error("useMusicPlayer must be used within MusicPlayerProvider");
+  return ctx;
+}
+
+export function useMusicTime(): MusicTimeState {
+  const ctx = useContext(MusicTimeContext);
+  if (!ctx) throw new Error("useMusicTime must be used within MusicPlayerProvider");
   return ctx;
 }

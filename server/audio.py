@@ -4,27 +4,37 @@ import subprocess
 import logging
 from flask import Blueprint, request, jsonify, current_app, send_file, Response
 
+from offload import singleflight
+
 audio_bp = Blueprint("audio", __name__)
 log = logging.getLogger(__name__)
 
 MIME_MAP = {
     ".mp3": "audio/mpeg",
     ".flac": "audio/flac",
-    ".ogg": "audio/ogg",
+    ".ogg": "audio/ogg",  # Ogg-encapsulated; correct for .opus files too
     ".wav": "audio/wav",
     ".m4a": "audio/mp4",
     ".aac": "audio/aac",
     ".wma": "audio/x-ms-wma",
-    ".opus": "audio/opus",
+    ".opus": "audio/ogg",
 }
 
 
 def _cache_dir():
-    return os.path.join(os.path.dirname(__file__), "..", "cache", "audio")
+    # Sibling of the thumbnail cache, inside the mounted cache volume.
+    # (The old repo-relative path resolved inside the container layer, so
+    # every restart threw all transcodes away.)
+    thumb_cache = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
+    return os.path.join(os.path.dirname(thumb_cache), "audio")
 
 
 def _cache_path(abs_path, bitrate):
-    h = hashlib.md5(abs_path.encode()).hexdigest()
+    try:
+        mtime = os.path.getmtime(abs_path)
+    except OSError:
+        mtime = 0
+    h = hashlib.md5(f"{abs_path}|{mtime}".encode()).hexdigest()
     return os.path.join(_cache_dir(), f"{h}_{bitrate}.mp3")
 
 
@@ -38,7 +48,7 @@ def serve_audio():
         return jsonify({"error": "path required"}), 400
 
     abs_path = os.path.realpath(os.path.join(root, rel_path))
-    if not abs_path.startswith(os.path.realpath(root)):
+    if not abs_path.startswith(os.path.realpath(root) + os.sep):
         return jsonify({"error": "forbidden"}), 403
     if not os.path.isfile(abs_path):
         return jsonify({"error": "not found"}), 404
@@ -67,28 +77,36 @@ def serve_audio():
     if os.path.isfile(cached):
         return send_file(cached, mimetype="audio/mpeg")
 
-    # Transcode with ffmpeg
-    os.makedirs(_cache_dir(), exist_ok=True)
-    tmp = cached + ".tmp"
-    cmd = [
-        "ffmpeg", "-y", "-i", abs_path,
-        "-vn",
-        "-codec:a", "libmp3lame",
-        "-b:a", bitrate,
-        "-f", "mp3",
-        tmp,
-    ]
+    # Transcode with ffmpeg. singleflight prevents two concurrent requests
+    # for the same track from racing on the same tmp file (interleaved
+    # writes corrupted the output; the loser's rename raised and 500'd).
+    def transcode():
+        if os.path.isfile(cached):
+            return True
+        os.makedirs(_cache_dir(), exist_ok=True)
+        tmp = f"{cached}.{os.getpid()}.tmp"
+        cmd = [
+            "ffmpeg", "-y", "-i", abs_path,
+            "-vn",
+            "-codec:a", "libmp3lame",
+            "-b:a", bitrate,
+            "-f", "mp3",
+            tmp,
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+            os.rename(tmp, cached)
+            return True
+        except subprocess.CalledProcessError as e:
+            log.error("ffmpeg transcode failed: %s", e.stderr.decode(errors="replace"))
+            return False
+        except subprocess.TimeoutExpired:
+            log.error("ffmpeg transcode timed out for %s", abs_path)
+            return False
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
 
-    try:
-        subprocess.run(cmd, check=True, capture_output=True, timeout=300)
-        os.rename(tmp, cached)
+    if singleflight(("audio", cached), transcode):
         return send_file(cached, mimetype="audio/mpeg")
-    except subprocess.CalledProcessError as e:
-        log.error("ffmpeg transcode failed: %s", e.stderr.decode(errors="replace"))
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        return jsonify({"error": "transcode failed"}), 500
-    except subprocess.TimeoutExpired:
-        if os.path.exists(tmp):
-            os.remove(tmp)
-        return jsonify({"error": "transcode timeout"}), 500
+    return jsonify({"error": "transcode failed"}), 500

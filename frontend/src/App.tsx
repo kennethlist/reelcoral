@@ -10,10 +10,13 @@ import { checkAuth, migrateLocalStorage, onAuthLost } from "./api";
 import { MusicPlayerProvider } from "./hooks/useMusicPlayer";
 import MusicBar from "./components/MusicBar";
 
-function useMigration() {
+function useMigration(authed: boolean | null) {
   useEffect(() => {
+    if (authed !== true) return;
     const MIGRATED_KEY = "rc-migrated-to-db";
-    if (localStorage.getItem(MIGRATED_KEY)) return;
+    try {
+      if (localStorage.getItem(MIGRATED_KEY)) return;
+    } catch {}
 
     const data: Record<string, unknown> = {};
 
@@ -44,14 +47,20 @@ function useMigration() {
     } catch {}
 
     if (Object.keys(data).length === 0) {
-      localStorage.setItem(MIGRATED_KEY, "1");
+      try {
+        localStorage.setItem(MIGRATED_KEY, "1");
+      } catch {}
       return;
     }
 
     migrateLocalStorage(data)
-      .then(() => localStorage.setItem(MIGRATED_KEY, "1"))
+      .then(() => {
+        try {
+          localStorage.setItem(MIGRATED_KEY, "1");
+        } catch {}
+      })
       .catch(() => {});
-  }, []);
+  }, [authed]);
 }
 
 export default function App() {
@@ -66,7 +75,7 @@ export default function App() {
   }, []);
 
   // Run migration after auth check
-  useMigration();
+  useMigration(authed);
 
   if (authed === null) {
     return (

@@ -220,7 +220,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     ? "grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-4"
     : "grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6";
   const currentPath = searchParams.get("path") || "/";
-  const currentPage = Number(searchParams.get("page") || "1");
+  const currentPage = Math.max(1, parseInt(searchParams.get("page") || "1", 10) || 1);
   const currentSearch = searchParams.get("search") || "";
   const activeLetter = searchParams.get("letter") || null;
   const currentSort = searchParams.get("sort") || "alpha";
@@ -298,17 +298,21 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   }, [currentPath, dirSortLoadedRef.current]);
 
   useEffect(() => {
+    let cancelled = false;
     setError("");
     setLoading(true);
     if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
     spinnerTimerRef.current = setTimeout(() => setShowSpinner(true), 300);
     browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
       .then((result) => {
+        if (cancelled) return;
         setData(result);
         // Restore scroll position if returning from player/gallery
         const savedY = popScrollPos(currentPath);
         if (savedY !== null) {
-          requestAnimationFrame(() => window.scrollTo({ top: savedY, behavior: "instant" }));
+          requestAnimationFrame(() => {
+            if (!cancelled) window.scrollTo({ top: savedY, behavior: "instant" });
+          });
         }
         // Use inline thumbnail data from browse response
         const thumbs = result.thumbnails || {};
@@ -322,22 +326,33 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         }
         setThumbHashMap(filtered);
         setThumbGenerated(new Set());
-        // Fire off individual generation requests so thumbnails pop in one by one
-        for (const path of uncached) {
-          generateThumbnail(path).then((ok) => {
-            if (ok) {
-              setThumbGenerated((prev) => new Set(prev).add(path));
-            }
-          }).catch(() => {});
-        }
+        // Generate uncached thumbnails with limited concurrency so thumbnails
+        // pop in one by one without overwhelming the server
+        let next = 0;
+        const worker = async () => {
+          while (!cancelled && next < uncached.length) {
+            const path = uncached[next++];
+            try {
+              const ok = await generateThumbnail(path);
+              if (ok && !cancelled) {
+                setThumbGenerated((prev) => new Set(prev).add(path));
+              }
+            } catch {}
+          }
+        };
+        for (let i = 0; i < Math.min(4, uncached.length); i++) worker();
       })
-      .catch(() => setError("Failed to load directory"))
+      .catch(() => {
+        if (!cancelled) setError("Failed to load directory");
+      })
       .finally(() => {
+        if (cancelled) return;
         setLoading(false);
         if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
         spinnerTimerRef.current = null;
         setShowSpinner(false);
       });
+    return () => { cancelled = true; };
   }, [currentPath, currentPage, prefs.page_size, currentSearch, activeLetter, currentSort, currentSortDir]);
 
   function addSortParams(params: Record<string, string>, sort = currentSort, dir = currentSortDir) {
@@ -455,12 +470,9 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
       navigate(entry.path);
     } else if (entry.is_audio && data?.is_music_folder) {
       const albumName = data.breadcrumbs[data.breadcrumbs.length - 1]?.name;
-      music.playSingle({
-        name: entry.name,
-        path: entry.path,
-        albumName,
-        coverArt: data.cover_art,
-      });
+      const tracks = buildPlaylist(data.entries, albumName, data.cover_art);
+      const startIndex = tracks.findIndex((t) => t.path === entry.path);
+      music.playAll(tracks, Math.max(0, startIndex));
     } else {
       // Save dir state and scroll position before leaving browse page
       saveDirState(currentPath, currentDirState());
@@ -486,11 +498,17 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     } else {
       await setFileStatus(path, status).catch(() => {});
     }
-    // Refresh browse data to update statuses
-    browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
-      .then((result) => setData(result))
-      .catch(() => {});
-  }, [currentPath, currentPage, prefs.page_size, currentSearch, activeLetter, currentSort, currentSortDir]);
+    // Update the matching entry locally instead of refetching the directory
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        entries: prev.entries.map((e) =>
+          e.path === path ? { ...e, file_status: status ?? undefined } : e
+        ),
+      };
+    });
+  }, []);
 
   // Available letters from server response
   const availableLetters = useMemo(() => {

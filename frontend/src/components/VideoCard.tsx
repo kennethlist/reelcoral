@@ -126,6 +126,8 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
           <img
             src={thumbUrl}
             alt=""
+            loading="lazy"
+            decoding="async"
             className="absolute inset-0 w-full h-full object-cover"
             onError={() => setThumbFailed(true)}
           />
@@ -150,6 +152,11 @@ export default function VideoCard({ entry, onClick, onEditThumbnail, onPlayAll, 
         {!musicMode && !entry.is_dir && isBookFormat && (thumbFailed || !thumbUrl) && (
           <svg className="w-12 h-12 text-blue-400 drop-shadow-lg" viewBox="0 0 24 24" fill="currentColor">
             <path d="M6 2a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5zM8 12h8v1.5H8V12zm0 3h8v1.5H8V15z"/>
+          </svg>
+        )}
+        {!musicMode && !entry.is_dir && !isBookFormat && (thumbFailed || !thumbUrl) && (
+          <svg className="w-12 h-12 text-blue-400 drop-shadow-lg" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18 4l2 4h-3l-2-4h-2l2 4h-3l-2-4H8l2 4H7L5 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V4h-4zm-8 13v-6l5 3-5 3z"/>
           </svg>
         )}
         {!musicMode && entry.is_dir && !thumbFailed && (

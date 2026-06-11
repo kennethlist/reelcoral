@@ -4,6 +4,7 @@ import hashlib
 import random
 import shutil
 import subprocess
+import threading
 import time
 import warnings
 import logging
@@ -19,18 +20,50 @@ CANDIDATE_POSITIONS = [0.10, 0.25, 0.40, 0.55, 0.70, 0.85]
 MAX_DIR_SCAN = 5000  # stop scanning after this many files to keep it fast
 BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz", ".zip"}
 
+# Serializes read-modify-write cycles on the overrides file so concurrent
+# select/reset calls can't lose each other's entries.
+_overrides_lock = threading.Lock()
+
 
 def _load_overrides():
     if os.path.exists(OVERRIDES_FILE):
-        with open(OVERRIDES_FILE) as f:
-            return json.load(f)
+        try:
+            with open(OVERRIDES_FILE) as f:
+                return json.load(f)
+        except Exception:
+            log.warning("Corrupt overrides file %s — starting empty", OVERRIDES_FILE)
     return {}
 
 
 def _save_overrides(data):
+    # tmp+rename so a crash mid-write can't corrupt the file (a corrupt file
+    # would silently reset all overrides on the next load).
     os.makedirs(os.path.dirname(OVERRIDES_FILE), exist_ok=True)
-    with open(OVERRIDES_FILE, "w") as f:
+    tmp = OVERRIDES_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(data, f)
+    os.rename(tmp, OVERRIDES_FILE)
+
+
+def _update_overrides(mutate):
+    """Atomically load, mutate, and persist the overrides map."""
+    with _overrides_lock:
+        overrides = _load_overrides()
+        result = mutate(overrides)
+        _save_overrides(overrides)
+    return result
+
+
+def _cleanup_candidates(browse_hash):
+    """Remove the temp candidate frames for a path; they otherwise leak
+    into the cache root permanently after each picker interaction."""
+    for i in range(9):
+        p = os.path.join(CACHE_DIR, f"{browse_hash}_candidate_{i}.jpg")
+        try:
+            if os.path.exists(p):
+                os.remove(p)
+        except OSError:
+            pass
 
 
 def _collect_media_files(dirpath, video_exts, image_exts=IMAGE_EXTS, depth=5):
@@ -81,7 +114,7 @@ def _resolve_path(path):
     config = current_app.config["MEDIA"]
     root = config["media"]["root"]
     filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))
-    if not filepath.startswith(os.path.realpath(root)):
+    if not filepath.startswith(os.path.realpath(root) + os.sep):
         return None, None
     return filepath, config
 
@@ -146,7 +179,7 @@ def _generate_book_thumb(book_path, candidate_path):
             return _generate_epub_thumb(book_path, candidate_path)
         elif ext == ".pdf":
             return _generate_pdf_thumb(book_path, candidate_path)
-        elif ext in (".cbr", ".cbz"):
+        elif ext in (".cbr", ".cbz", ".zip"):
             return _generate_comic_thumb(book_path, candidate_path)
     except Exception as e:
         log.warning("Book thumbnail generation failed for %s: %s", book_path, e)
@@ -224,7 +257,7 @@ def _generate_comic_thumb(comic_path, candidate_path):
         return [int(c) if c.isdigit() else c.lower() for c in re_mod.split(r'(\d+)', s)]
 
     names = []
-    if ext == ".cbz":
+    if ext in (".cbz", ".zip"):
         with zipfile.ZipFile(comic_path, "r") as zf:
             for name in zf.namelist():
                 if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
@@ -288,7 +321,7 @@ def candidates():
     if not path:
         return jsonify({"error": "path required"}), 400
 
-    count = min(9, max(1, int(request.args.get("count", 3))))
+    count = min(9, max(1, request.args.get("count", 3, type=int) or 3))
 
     filepath, config = _resolve_path(path)
     if not filepath:
@@ -372,20 +405,24 @@ def select():
         cache_path = cache_path_for(override_hash)
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
-        # Save upload to temp file, then resize with ffmpeg
+        # Save upload to temp file, then resize with ffmpeg (atomic output)
         tmp_path = cache_path + ".tmp"
+        tmp_out = cache_path + ".part.jpg"
         image.save(tmp_path)
         cmd = [
             "ffmpeg", "-i", tmp_path,
             "-vf", "scale=320:-1",
             "-frames:v", "1",
-            "-y", cache_path,
+            "-y", tmp_out,
         ]
         result = subprocess.run(cmd, capture_output=True, timeout=30)
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
-        if result.returncode != 0:
+        if result.returncode != 0 or not os.path.exists(tmp_out):
+            if os.path.exists(tmp_out):
+                os.remove(tmp_out)
             return jsonify({"error": "image processing failed"}), 500
+        os.rename(tmp_out, cache_path)
 
     else:
         data = request.get_json()
@@ -412,9 +449,8 @@ def select():
         os.makedirs(os.path.dirname(cache_path), exist_ok=True)
         shutil.copy2(candidate_path, cache_path)
 
-    overrides = _load_overrides()
-    overrides[path] = override_hash
-    _save_overrides(overrides)
+    _update_overrides(lambda o: o.update({path: override_hash}))
+    _cleanup_candidates(override_hash)
 
     return jsonify({"ok": True})
 
@@ -426,13 +462,12 @@ def reset():
         return jsonify({"error": "path required"}), 400
 
     # Remove override entry and its cached file
-    overrides = _load_overrides()
-    override_hash = overrides.pop(path, None)
-    _save_overrides(overrides)
+    override_hash = _update_overrides(lambda o: o.pop(path, None))
 
     if override_hash:
         cache_path = cache_path_for(override_hash)
         if os.path.exists(cache_path):
             os.remove(cache_path)
+    _cleanup_candidates(hashlib.sha256(path.encode()).hexdigest())
 
     return jsonify({"ok": True})

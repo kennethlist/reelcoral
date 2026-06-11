@@ -162,7 +162,8 @@ export async function startStream(
 }
 
 export async function stopStream(sessionId: string): Promise<void> {
-  await apiFetch(`/api/stream/${sessionId}`, { method: "DELETE" });
+  const res = await apiFetch(`/api/stream/${sessionId}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Stream stop failed");
 }
 
 export async function getThumbnailCandidates(
@@ -230,10 +231,22 @@ export interface AppConfig {
   music_profiles: { name: string; bitrate?: string }[];
 }
 
-export async function getConfig(): Promise<AppConfig> {
-  const res = await apiFetch("/api/config");
-  if (!res.ok) throw new Error("Config fetch failed");
-  return res.json();
+// Config rarely changes; cache the promise so many components mounting
+// at once share a single request. Reset on failure so callers can retry.
+let configPromise: Promise<AppConfig> | null = null;
+
+export function getConfig(): Promise<AppConfig> {
+  if (!configPromise) {
+    configPromise = (async () => {
+      const res = await apiFetch("/api/config");
+      if (!res.ok) throw new Error("Config fetch failed");
+      return res.json();
+    })().catch((err) => {
+      configPromise = null;
+      throw err;
+    });
+  }
+  return configPromise;
 }
 
 export function audioUrl(path: string, profile = "Original"): string {
@@ -362,11 +375,12 @@ export async function getUserPreferences(): Promise<Record<string, unknown>> {
 }
 
 export async function saveUserPreferences(prefs: Record<string, unknown>): Promise<void> {
-  await apiFetch("/api/user/preferences", {
+  const res = await apiFetch("/api/user/preferences", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(prefs),
   });
+  if (!res.ok) throw new Error("Failed to save preferences");
 }
 
 export async function getUserData(key: string): Promise<Record<string, unknown>> {
@@ -376,27 +390,30 @@ export async function getUserData(key: string): Promise<Record<string, unknown>>
 }
 
 export async function saveUserData(key: string, data: Record<string, unknown>): Promise<void> {
-  await apiFetch(`/api/user/data/${encodeURIComponent(key)}`, {
+  const res = await apiFetch(`/api/user/data/${encodeURIComponent(key)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
+  if (!res.ok) throw new Error("Failed to save user data");
 }
 
 export async function setFileStatus(path: string, status: "opened" | "completed"): Promise<void> {
-  await apiFetch("/api/user/file-status", {
+  const res = await apiFetch("/api/user/file-status", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path, status }),
   });
+  if (!res.ok) throw new Error("Failed to set file status");
 }
 
 export async function clearFileStatus(path: string): Promise<void> {
-  await apiFetch("/api/user/file-status", {
+  const res = await apiFetch("/api/user/file-status", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
   });
+  if (!res.ok) throw new Error("Failed to clear file status");
 }
 
 export async function migrateLocalStorage(data: Record<string, unknown>): Promise<void> {

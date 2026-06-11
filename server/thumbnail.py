@@ -2,10 +2,12 @@ import os
 import json
 import hashlib
 import subprocess
+import threading
 import warnings
 import logging
 from flask import Blueprint, request, current_app, send_file, jsonify
 from probe import ffprobe
+from offload import run_blocking, singleflight
 
 thumbnail_bp = Blueprint("thumbnail", __name__)
 log = logging.getLogger(__name__)
@@ -13,6 +15,36 @@ log = logging.getLogger(__name__)
 CACHE_DIR = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz", ".zip"}
+
+# Global cap on concurrent thumbnail generation (each spawns ffmpeg, and the
+# video path decodes 300 frames). Sized from config thumbnails.threads.
+_gen_semaphore = None
+_gen_semaphore_lock = threading.Lock()
+
+
+def _semaphore(config):
+    global _gen_semaphore
+    with _gen_semaphore_lock:
+        if _gen_semaphore is None:
+            threads = config.get("thumbnails", {}).get("threads", 4)
+            try:
+                threads = max(1, min(64, int(threads)))
+            except (TypeError, ValueError):
+                threads = 4
+            _gen_semaphore = threading.BoundedSemaphore(threads)
+        return _gen_semaphore
+
+
+def _load_overrides_safe():
+    """Load thumbnail_overrides.json, tolerating a missing/corrupt file."""
+    overrides_file = os.path.join(os.path.dirname(CACHE_DIR), "thumbnail_overrides.json")
+    if os.path.exists(overrides_file):
+        try:
+            with open(overrides_file) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
 
 
 def cache_path_for(path_hash):
@@ -88,18 +120,25 @@ def _generate_book_thumbnail(book_path, cache_path):
 
 
 def _resize_to_thumb(input_path, output_path):
-    """Resize an image file to thumbnail width using ffmpeg."""
+    """Resize an image file to thumbnail width using ffmpeg (atomic write)."""
+    tmp_out = output_path + ".part.jpg"
     cmd = [
         "ffmpeg", "-i", input_path,
         "-vf", "scale=320:-1",
         "-frames:v", "1",
-        "-y", output_path,
+        "-y", tmp_out,
     ]
-    subprocess.run(cmd, capture_output=True, timeout=30)
-    return os.path.exists(output_path)
+    result = subprocess.run(cmd, capture_output=True, timeout=30)
+    if result.returncode == 0 and os.path.exists(tmp_out):
+        os.rename(tmp_out, output_path)
+        return True
+    if os.path.exists(tmp_out):
+        os.remove(tmp_out)
+    return False
 
 
-def _generate_epub_thumbnail(epub_path, cache_path):
+def _extract_epub_cover(epub_path):
+    """Pure-CPU EPUB cover extraction (safe to run on the threadpool)."""
     import ebooklib
     from ebooklib import epub
 
@@ -121,40 +160,56 @@ def _generate_epub_thumbnail(epub_path, cache_path):
         if images:
             cover = images[0]
     if not cover:
+        return None
+    return cover.get_content()
+
+
+def _generate_epub_thumbnail(epub_path, cache_path):
+    data = run_blocking(_extract_epub_cover, epub_path)
+    if not data:
         return False
 
     tmp_path = cache_path + ".tmp"
     with open(tmp_path, "wb") as f:
-        f.write(cover.get_content())
+        f.write(data)
     try:
         return _resize_to_thumb(tmp_path, cache_path)
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+
+def _render_pdf_first_page(pdf_path, tmp_path):
+    """Pure-CPU PDF first-page render (safe to run on the threadpool)."""
+    import pymupdf
+    doc = pymupdf.open(pdf_path)
+    try:
+        if doc.page_count == 0:
+            return False
+        pg = doc[0]
+        zoom = 320 / pg.rect.width
+        zoom = max(0.5, min(zoom, 5.0))
+        mat = pymupdf.Matrix(zoom, zoom)
+        pix = pg.get_pixmap(matrix=mat)
+        pix.save(tmp_path)
+        return True
+    finally:
+        doc.close()
 
 
 def _generate_pdf_thumbnail(pdf_path, cache_path):
-    import pymupdf
-    doc = pymupdf.open(pdf_path)
-    if doc.page_count == 0:
-        doc.close()
-        return False
-    pg = doc[0]
-    zoom = 320 / pg.rect.width
-    zoom = max(0.5, min(zoom, 5.0))
-    mat = pymupdf.Matrix(zoom, zoom)
-    pix = pg.get_pixmap(matrix=mat)
     tmp_path = cache_path + ".tmp.png"
-    pix.save(tmp_path)
-    doc.close()
     try:
+        if not run_blocking(_render_pdf_first_page, pdf_path, tmp_path):
+            return False
         return _resize_to_thumb(tmp_path, cache_path)
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
 
-def _generate_comic_thumbnail(comic_path, cache_path):
+def _extract_zip_comic_first_page(comic_path):
+    """Pure-CPU zip comic first-page extraction (safe on the threadpool)."""
     import re
     import zipfile
     comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
@@ -162,29 +217,46 @@ def _generate_comic_thumbnail(comic_path, cache_path):
     def natural_sort_key(s):
         return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
 
-    ext = os.path.splitext(comic_path)[1].lower()
     names = []
-    data = None
+    with zipfile.ZipFile(comic_path, "r") as zf:
+        for name in zf.namelist():
+            if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
+                names.append(name)
+        names.sort(key=natural_sort_key)
+        if not names:
+            return None
+        return zf.read(names[0])
 
+
+def _extract_cbr_comic_first_page(comic_path):
+    """CBR first-page extraction. rarfile shells out to unrar (cooperative
+    under gevent), so this must stay in the request greenlet."""
+    import re
+    import rarfile
+    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+
+    def natural_sort_key(s):
+        return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
+
+    names = []
+    with rarfile.RarFile(comic_path, "r") as rf:
+        for name in rf.namelist():
+            if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
+                names.append(name)
+        names.sort(key=natural_sort_key)
+        if not names:
+            return None
+        return rf.read(names[0])
+
+
+def _generate_comic_thumbnail(comic_path, cache_path):
+    ext = os.path.splitext(comic_path)[1].lower()
     if ext in (".cbz", ".zip"):
-        with zipfile.ZipFile(comic_path, "r") as zf:
-            for name in zf.namelist():
-                if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
-                    names.append(name)
-            names.sort(key=natural_sort_key)
-            if not names:
-                return False
-            data = zf.read(names[0])
+        data = run_blocking(_extract_zip_comic_first_page, comic_path)
     elif ext == ".cbr":
-        import rarfile
-        with rarfile.RarFile(comic_path, "r") as rf:
-            for name in rf.namelist():
-                if os.path.splitext(name)[1].lower() in comic_image_exts and not os.path.basename(name).startswith("."):
-                    names.append(name)
-            names.sort(key=natural_sort_key)
-            if not names:
-                return False
-            data = rf.read(names[0])
+        data = _extract_cbr_comic_first_page(comic_path)
+    else:
+        data = None
 
     if not data:
         return False
@@ -208,7 +280,7 @@ def _resolve_thumb_target(root, real_root, path, extensions):
         return None
 
     filepath = os.path.realpath(os.path.join(root, path.lstrip("/")))
-    if not filepath.startswith(real_root):
+    if not filepath.startswith(real_root + os.sep):
         return None
 
     is_image = False
@@ -242,8 +314,12 @@ def _migrate_legacy(path_hash):
     cp = cache_path_for(path_hash)
     legacy_path = os.path.join(CACHE_DIR, f"{path_hash}.jpg")
     if not os.path.exists(cp) and os.path.exists(legacy_path):
-        os.makedirs(os.path.dirname(cp), exist_ok=True)
-        os.rename(legacy_path, cp)
+        try:
+            os.makedirs(os.path.dirname(cp), exist_ok=True)
+            os.rename(legacy_path, cp)
+        except OSError:
+            # Concurrent request won the rename — cp exists now.
+            pass
     return cp
 
 
@@ -252,14 +328,17 @@ def _generate_thumbnail(filepath, cache_path, is_image, is_book, extensions):
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
     if is_book:
+        # The book generators offload their CPU-bound extraction internally
+        # and keep their ffmpeg resize (cooperative) in this greenlet.
         return _generate_book_thumbnail(filepath, cache_path)
 
+    tmp_out = cache_path + ".part.jpg"
     if is_image:
         cmd = [
             "ffmpeg", "-i", filepath,
             "-vf", "scale=320:-1",
             "-frames:v", "1",
-            "-y", cache_path
+            "-y", tmp_out
         ]
     else:
         data = ffprobe(filepath)
@@ -269,11 +348,31 @@ def _generate_thumbnail(filepath, cache_path, is_image, is_book, extensions):
             "ffmpeg", "-ss", str(seek), "-i", filepath,
             "-vf", "thumbnail=300,scale=320:-1",
             "-frames:v", "1",
-            "-y", cache_path
+            "-y", tmp_out
         ]
 
     result = subprocess.run(cmd, capture_output=True, timeout=30)
-    return result.returncode == 0 and os.path.exists(cache_path)
+    if result.returncode == 0 and os.path.exists(tmp_out):
+        os.rename(tmp_out, cache_path)
+        return True
+    if os.path.exists(tmp_out):
+        os.remove(tmp_out)
+    return False
+
+
+def _generate_thumbnail_guarded(config, filepath, cache_path, is_image, is_book, extensions):
+    """Thundering-herd-safe generation: concurrent requests for the same
+    thumbnail share one generation, and total concurrent generations are
+    capped by config thumbnails.threads."""
+    def generate():
+        if os.path.exists(cache_path):
+            return True
+        with _semaphore(config):
+            if os.path.exists(cache_path):
+                return True
+            return _generate_thumbnail(filepath, cache_path, is_image, is_book, extensions)
+
+    return singleflight(("thumb", cache_path), generate)
 
 
 @thumbnail_bp.route("/thumbnails/batch", methods=["POST"])
@@ -289,11 +388,7 @@ def thumbnails_batch():
         return jsonify({"error": "invalid paths"}), 400
 
     # Load overrides once
-    overrides = {}
-    overrides_file = os.path.join(os.path.dirname(CACHE_DIR), "thumbnail_overrides.json")
-    if os.path.exists(overrides_file):
-        with open(overrides_file) as f:
-            overrides = json.load(f)
+    overrides = _load_overrides_safe()
 
     thumbnails = {}
     for path in paths:
@@ -346,7 +441,7 @@ def thumbnails_generate():
             continue
 
         try:
-            if _generate_thumbnail(target, cp, is_image, is_book, extensions):
+            if _generate_thumbnail_guarded(config, target, cp, is_image, is_book, extensions):
                 generated.append(path)
         except Exception as e:
             log.warning("Thumbnail generation failed for %s: %s", path, e)
@@ -363,15 +458,12 @@ def thumbnail():
     path = request.args.get("path", "")
 
     # Check for a thumbnail override (keyed by browse path, not media file)
-    overrides_file = os.path.join(os.path.dirname(CACHE_DIR), "thumbnail_overrides.json")
-    if os.path.exists(overrides_file):
-        with open(overrides_file) as f:
-            overrides = json.load(f)
-        override_hash = overrides.get(path)
-        if override_hash:
-            override_cache = cache_path_for(override_hash)
-            if os.path.exists(override_cache):
-                return send_file(override_cache, mimetype="image/jpeg", max_age=86400)
+    overrides = _load_overrides_safe()
+    override_hash = overrides.get(path)
+    if override_hash:
+        override_cache = cache_path_for(override_hash)
+        if os.path.exists(override_cache):
+            return send_file(override_cache, mimetype="image/jpeg", max_age=86400)
 
     resolved = _resolve_thumb_target(root, real_root, path, extensions)
     if not resolved:
@@ -389,7 +481,7 @@ def thumbnail():
         return jsonify({"error": "no thumbnail cached"}), 404
 
     try:
-        if _generate_thumbnail(filepath, cache_path, is_image, is_book, extensions):
+        if _generate_thumbnail_guarded(config, filepath, cache_path, is_image, is_book, extensions):
             return send_file(cache_path, mimetype="image/jpeg", max_age=86400)
     except Exception as e:
         log.warning("Thumbnail generation failed for %s: %s", path, e)

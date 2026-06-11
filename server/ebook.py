@@ -1,30 +1,67 @@
 import os
 import base64
 import re
+import threading
 import warnings
 import logging
+from collections import OrderedDict
 from flask import Blueprint, request, jsonify, current_app, send_file
 from io import BytesIO
+
+from offload import run_blocking, singleflight
 
 ebook_bp = Blueprint("ebook", __name__)
 log = logging.getLogger(__name__)
 
+# Parsed-book LRU keyed by (path, mtime). read_epub is a full zip + lxml
+# parse and used to run on EVERY chapter request, blocking the event loop
+# for the whole parse. Books are read-only after parse, so sharing the
+# object between requests is safe.
+_BOOK_CACHE = OrderedDict()
+_BOOK_CACHE_LOCK = threading.Lock()
+_BOOK_CACHE_MAX = 3
+
 
 def _resolve_path(root, rel_path):
     abs_path = os.path.realpath(os.path.join(root, rel_path.lstrip("/")))
-    if not abs_path.startswith(os.path.realpath(root)):
+    if not abs_path.startswith(os.path.realpath(root) + os.sep):
         return None
     return abs_path
 
 
-def _parse_epub(abs_path):
-    import ebooklib
+def _read_epub(abs_path):
+    import ebooklib  # noqa: F401
     from ebooklib import epub
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        book = epub.read_epub(abs_path)
-    return book
+        return epub.read_epub(abs_path)
+
+
+def _parse_epub(abs_path):
+    try:
+        mtime = os.path.getmtime(abs_path)
+    except OSError:
+        mtime = 0
+    key = (abs_path, mtime)
+
+    with _BOOK_CACHE_LOCK:
+        if key in _BOOK_CACHE:
+            _BOOK_CACHE.move_to_end(key)
+            return _BOOK_CACHE[key]
+
+    def do_parse():
+        with _BOOK_CACHE_LOCK:
+            if key in _BOOK_CACHE:
+                return _BOOK_CACHE[key]
+        book = run_blocking(_read_epub, abs_path)
+        with _BOOK_CACHE_LOCK:
+            _BOOK_CACHE[key] = book
+            while len(_BOOK_CACHE) > _BOOK_CACHE_MAX:
+                _BOOK_CACHE.popitem(last=False)
+        return book
+
+    return singleflight(("epub", key), do_parse)
 
 
 @ebook_bp.route("/info")
@@ -114,8 +151,10 @@ def ebook_chapter():
     config = current_app.config["MEDIA"]
     root = config["media"]["root"]
     path = request.args.get("path", "")
-    index = int(request.args.get("index", 0))
+    index = request.args.get("index", 0, type=int)
     max_width = request.args.get("maxWidth", 0, type=int)
+    if index is None or max_width is None:
+        return jsonify({"error": "invalid parameters"}), 400
     abs_path = _resolve_path(root, path)
     if not abs_path or not os.path.isfile(abs_path):
         return jsonify({"error": "not found"}), 404
@@ -138,6 +177,13 @@ def ebook_chapter():
         return jsonify({"error": "chapter index out of range"}), 400
 
     item = doc_items[index]
+    # Image re-encoding + the regex passes below chew CPU proportional to
+    # chapter size — run off the event loop so HLS segments keep flowing.
+    html = run_blocking(_render_chapter_html, book, item, max_width)
+    return jsonify({"html": html, "index": index})
+
+
+def _render_chapter_html(book, item, max_width):
     html = item.get_content().decode("utf-8", errors="replace")
 
     # Inline images: replace src references with base64 data URIs
@@ -208,7 +254,7 @@ def ebook_chapter():
     # Strip structural HTML tags (meaningless inside a div)
     html = re.sub(r'</?(?:html|head|body|meta)\b[^>]*>', '', html, flags=re.IGNORECASE)
 
-    return jsonify({"html": html, "index": index})
+    return html
 
 
 @ebook_bp.route("/cover")
@@ -220,7 +266,11 @@ def ebook_cover():
     if not abs_path or not os.path.isfile(abs_path):
         return jsonify({"error": "not found"}), 404
 
-    book = _parse_epub(abs_path)
+    try:
+        book = _parse_epub(abs_path)
+    except Exception as e:
+        log.error("Failed to parse EPUB %s: %s", abs_path, e)
+        return jsonify({"error": f"Failed to parse EPUB: {str(e)}"}), 500
 
     import ebooklib
     # Try to find cover image

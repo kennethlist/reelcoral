@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 
 def _resolve_path(root, rel_path):
     abs_path = os.path.realpath(os.path.join(root, rel_path.lstrip("/")))
-    if not abs_path.startswith(os.path.realpath(root)):
+    if not abs_path.startswith(os.path.realpath(root) + os.sep):
         return None
     return abs_path
 
@@ -41,11 +41,12 @@ def markdown_content():
         text = f.read()
 
     extensions = ["fenced_code", "tables", "toc", "sane_lists"]
-    try:
-        import codehilite  # noqa: F401
+    # codehilite lives at markdown.extensions.codehilite and needs Pygments;
+    # the old `import codehilite` could never succeed, silently disabling
+    # syntax highlighting.
+    import importlib.util
+    if importlib.util.find_spec("pygments") is not None:
         extensions.append("codehilite")
-    except ImportError:
-        pass
 
     html = markdown.markdown(text, extensions=extensions)
     return jsonify({"html": html})

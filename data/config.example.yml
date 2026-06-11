@@ -68,7 +68,8 @@ music:
 
 thumbnails:
   generate_on_fly: true
-  threads: 24
+  # Max concurrent thumbnail generations (each spawns an ffmpeg process)
+  threads: 8
 
 defaults:
   quality: "original"

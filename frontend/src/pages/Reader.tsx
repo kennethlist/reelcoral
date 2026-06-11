@@ -193,20 +193,26 @@ function EpubReader({
       const count = data.chapter_count;
       const parts: string[] = new Array(count);
 
-      for (let i = 0; i < count; i++) {
-        if (cancelled) return;
-        setLoadProgress(`Loading chapter ${i + 1} / ${count}...`);
-        const chapter = await getEbookChapter(path, i, imageMaxWidth);
-        if (cancelled) return;
-        parts[i] = chapter.html;
-      }
+      // Fetch chapters with bounded concurrency, preserving order via parts[i]
+      let nextChapter = 0;
+      let loadedCount = 0;
+      const worker = async () => {
+        while (!cancelled && nextChapter < count) {
+          const i = nextChapter++;
+          const chapter = await getEbookChapter(path, i, imageMaxWidth);
+          if (cancelled) return;
+          parts[i] = chapter.html;
+          loadedCount++;
+          setLoadProgress(`Loading chapter ${loadedCount} / ${count}...`);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, count) }, () => worker()));
       if (cancelled) return;
 
       // All chapters loaded — set HTML once and restore position.
       // Read from _positionMap directly (module-level, updated by server fetch)
       // rather than the closure-captured initialPosition which may be stale.
       const saved = _positionMap[path] || initialPosition;
-      console.log("[EpubReader] chapters loaded, restore position:", { path, saved, _positionMap: { ..._positionMap }, initialPosition, navMode: settings.navMode });
 
       // Extract text for pretext prediction and cache it
       const texts: string[] = [];
@@ -228,13 +234,11 @@ function EpubReader({
           const maxW = computeMaxWidth(containerW, settings.epubMargin, true);
           const lineHeightPx = settings.epubFontSize * settings.epubLineHeight;
           const predicted = predictPageCount(texts, imgHeights, font, maxW, lineHeightPx, containerH);
-          console.log("[EpubReader] pretext predicted pages:", predicted);
           setTotalPages(predicted);
           if (saved?.progress != null) {
             progressRef.current = saved.progress;
             const predictedPage = Math.round(saved.progress * (predicted - 1));
             setCurrentPage(predictedPage);
-            console.log("[EpubReader] pretext restored position:", { predictedPage, progress: saved.progress });
           }
         }
       }
@@ -246,7 +250,6 @@ function EpubReader({
       // Restore saved position
       if (saved?.progress != null) {
         progressRef.current = saved.progress;
-        console.log("[EpubReader] set progressRef =", saved.progress);
       }
       if (settings.navMode === "scroll" && saved?.scrollY) {
         setLoading(false);
@@ -255,11 +258,9 @@ function EpubReader({
           requestAnimationFrame(() => setContentReady(true));
         });
       } else if (settings.navMode === "page" && saved?.progress != null) {
-        console.log("[EpubReader] page mode restore: predicted, showing content early");
         setLoading(false);
         setContentReady(true); // Show content immediately with predicted position
       } else {
-        console.log("[EpubReader] no position to restore, saved:", saved);
         setLoading(false);
         setContentReady(true);
       }
@@ -267,7 +268,7 @@ function EpubReader({
     });
 
     return () => { cancelled = true; };
-  }, [path]);
+  }, [path, imageMaxWidth]);
 
   // Clipping wrapper ref — used to measure the single-page width and height.
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -295,7 +296,6 @@ function EpubReader({
     setTotalPages(pages);
     // Restore position from progress fraction
     const newPage = Math.min(Math.round(progressRef.current * (pages - 1)), pages - 1);
-    console.log("[EpubReader] countPages:", { pages, progressRef: progressRef.current, newPage, positionRestored: positionRestoredRef.current });
     setCurrentPage(newPage);
     // Reveal content after first countPages post-restore positions correctly
     if (!contentReady && positionRestoredRef.current) {
@@ -410,7 +410,7 @@ function EpubReader({
       }, 300);
     }
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-  }, [currentPage, totalPages, settings.navMode, info]);
+  }, [currentPage, totalPages, settings.navMode, info, fullyLoaded]);
 
   // Flush position on unmount so closing within the debounce window doesn't lose progress
   useEffect(() => {
@@ -586,8 +586,17 @@ function ImagePageReader({
       }
     };
     measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    // Debounce resize so drag-resizing doesn't trigger a server re-render per tick
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onResize = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(measure, 200);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (timer) clearTimeout(timer);
+    };
   }, []);
 
   // Load info
@@ -685,8 +694,9 @@ function ImagePageReader({
 
   // Background-preload the whole comic once it's opened, so page switches are instant.
   // Warms both the browser cache and the server-side extracted-page cache.
+  // Page-flip mode only: scroll mode already lazy-loads pages as they come into view.
   useEffect(() => {
-    if (format === "pdf" || pageCount <= 0) return;
+    if (format === "pdf" || pageCount <= 0 || settings.navMode !== "page") return;
     let cancelled = false;
 
     // Visit pages starting near where the reader is, expanding outward.
@@ -709,7 +719,7 @@ function ImagePageReader({
     for (let i = 0; i < CONCURRENCY; i++) loadNext();
 
     return () => { cancelled = true; };
-  }, [path, pageCount, format, imageMaxWidth]);
+  }, [path, pageCount, format, imageMaxWidth, settings.navMode]);
 
   if (loading) {
     return <div className="flex-1 flex items-center justify-center text-gray-400">Loading...</div>;
@@ -1222,11 +1232,9 @@ export default function Reader() {
       }
     }).catch(() => {});
     getUserData("read_positions").then((serverPositions) => {
-      console.log("[Reader] server positions:", serverPositions, "currentPath:", currentPath);
       if (serverPositions && Object.keys(serverPositions).length > 0) {
         Object.assign(_positionMap, serverPositions);
       }
-      console.log("[Reader] _positionMap[currentPath]:", _positionMap[currentPath]);
       setInitialPosition(_positionMap[currentPath] || null);
     }).catch(() => {
       setInitialPosition(_positionMap[currentPath] || null);
@@ -1244,6 +1252,9 @@ export default function Reader() {
   }, []);
 
   const [pageInfo, setPageInfo] = useState({ current: 0, total: 0 });
+  // While scrubbing the slider, show a local preview (1-based page) and only
+  // navigate on release — avoids a server page-render fetch per drag tick.
+  const [sliderPreview, setSliderPreview] = useState<number | null>(null);
 
   // Sibling files
   const [allFiles, setAllFiles] = useState<BrowseEntry[]>([]);
@@ -1515,6 +1526,7 @@ export default function Reader() {
           <>
             {format === "epub" && (
               <EpubReader
+                key={currentPath}
                 path={currentPath}
                 settings={settings}
                 imageMaxWidth={prefs.image_max_width}
@@ -1523,18 +1535,20 @@ export default function Reader() {
                   if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
                 }}
                 controlsVisible={controlsVisible}
-                initialPosition={initialPosition}
+                initialPosition={_positionMap[currentPath] ?? null}
               />
             )}
             {format === "md" && (
               <MarkdownReader
+                key={currentPath}
                 path={currentPath}
                 settings={settings}
-                initialPosition={initialPosition}
+                initialPosition={_positionMap[currentPath] ?? null}
               />
             )}
             {(format === "pdf" || format === "cbr" || format === "cbz") && (
               <ImagePageReader
+                key={currentPath}
                 path={currentPath}
                 format={format}
                 settings={settings}
@@ -1544,7 +1558,7 @@ export default function Reader() {
                   if (t > 0 && c >= t) setFileStatus(currentPath, "completed").catch(() => {});
                 }}
                 controlsVisible={controlsVisible}
-                initialPosition={initialPosition}
+                initialPosition={_positionMap[currentPath] ?? null}
               />
             )}
           </>
@@ -1651,15 +1665,16 @@ export default function Reader() {
                 className="relative w-full h-8 flex items-center cursor-pointer touch-none"
                 onPointerDown={(e) => {
                   const track = e.currentTarget;
+                  // Pointer capture routes move/up to the track even when the
+                  // drag ends outside the element, so commit always fires.
                   track.setPointerCapture(e.pointerId);
                   sliderDraggingRef.current = true;
+                  let previewPage = pageInfo.current;
                   const update = (cx: number) => {
                     const rect = track.getBoundingClientRect();
                     const ratio = Math.max(0, Math.min(1, (cx - rect.left) / rect.width));
-                    const page = Math.round(ratio * (pageInfo.total - 1)) + 1;
-                    if (page !== pageInfo.current) {
-                      (window as any).__readerGoToPage?.(page - 1);
-                    }
+                    previewPage = Math.round(ratio * (pageInfo.total - 1)) + 1;
+                    setSliderPreview(previewPage);
                   };
                   update(e.clientX);
                   const onMove = (ev: PointerEvent) => {
@@ -1668,6 +1683,11 @@ export default function Reader() {
                   };
                   const onUp = () => {
                     sliderDraggingRef.current = false;
+                    // Commit the scrubbed page only on release
+                    if (previewPage !== pageInfo.current) {
+                      (window as any).__readerGoToPage?.(previewPage - 1);
+                    }
+                    setSliderPreview(null);
                     track.removeEventListener("pointermove", onMove);
                     track.removeEventListener("pointerup", onUp);
                     track.removeEventListener("pointercancel", onUp);
@@ -1680,12 +1700,12 @@ export default function Reader() {
                 <div className="absolute left-0 right-0 h-1.5 rounded-full bg-white/20">
                   <div
                     className="h-full rounded-full bg-white/50"
-                    style={{ width: `${((pageInfo.current - 1) / Math.max(1, pageInfo.total - 1)) * 100}%` }}
+                    style={{ width: `${(((sliderPreview ?? pageInfo.current) - 1) / Math.max(1, pageInfo.total - 1)) * 100}%` }}
                   />
                 </div>
                 <div
                   className="absolute w-5 h-5 rounded-full bg-white shadow-lg -translate-x-1/2 pointer-events-none"
-                  style={{ left: `${((pageInfo.current - 1) / Math.max(1, pageInfo.total - 1)) * 100}%` }}
+                  style={{ left: `${(((sliderPreview ?? pageInfo.current) - 1) / Math.max(1, pageInfo.total - 1)) * 100}%` }}
                 />
               </div>
             )}
@@ -1707,7 +1727,7 @@ export default function Reader() {
                   <input
                     type="text"
                     inputMode="numeric"
-                    value={pageInputFocused ? pageInputValue : String(pageInfo.current)}
+                    value={pageInputFocused ? pageInputValue : String(sliderPreview ?? pageInfo.current)}
                     onChange={(e) => setPageInputValue(e.target.value.replace(/[^0-9]/g, ""))}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") (e.target as HTMLInputElement).blur();

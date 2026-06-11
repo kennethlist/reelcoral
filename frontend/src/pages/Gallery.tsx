@@ -40,6 +40,7 @@ export default function Gallery() {
   const [images, setImages] = useState<BrowseEntry[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isTouch] = useState(() => isTouchDevice());
@@ -58,6 +59,7 @@ export default function Gallery() {
   const imageLoadedRef = useRef(false);
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingStatusRef = useRef<string | null>(null);
+  const pendingStatusValueRef = useRef<"opened" | "completed">("opened");
   const blackScreenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
 
@@ -70,7 +72,7 @@ export default function Gallery() {
         // Use sendBeacon so the request isn't cancelled by unmount
         navigator.sendBeacon(
           "/api/user/file-status",
-          new Blob([JSON.stringify({ path: p, status: "opened" })], { type: "application/json" })
+          new Blob([JSON.stringify({ path: p, status: pendingStatusValueRef.current })], { type: "application/json" })
         );
       }
     };
@@ -107,6 +109,7 @@ export default function Gallery() {
         const idx = imgs.findIndex((e) => e.path === currentPath);
         setCurrentIndex(idx >= 0 ? idx : 0);
       })
+      .catch(() => setError("Failed to load directory"))
       .finally(() => setLoading(false));
   }, []);
 
@@ -122,10 +125,11 @@ export default function Gallery() {
       pendingStatusRef.current = img.path;
       if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
       const isLast = currentIndex === images.length - 1;
+      pendingStatusValueRef.current = isLast ? "completed" : "opened";
       statusTimerRef.current = setTimeout(() => {
         const p = pendingStatusRef.current;
         if (p) {
-          setFileStatus(p, isLast ? "completed" : "opened").catch(() => {});
+          setFileStatus(p, pendingStatusValueRef.current).catch(() => {});
           pendingStatusRef.current = null;
         }
       }, 300);
@@ -318,6 +322,7 @@ export default function Gallery() {
   // Keyboard navigation
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
+      if ((e.target as HTMLElement).closest("input, select, textarea")) return;
       if (e.key === "ArrowLeft") { e.preventDefault(); goTo(pageDirection === "reverse" ? 1 : -1); }
       else if (e.key === "ArrowRight") { e.preventDefault(); goTo(pageDirection === "reverse" ? -1 : 1); }
       else if (e.key === "ArrowUp") { e.preventDefault(); goTo(pageDirection === "horseshoe" ? 1 : -1); }
@@ -358,6 +363,34 @@ export default function Gallery() {
     return (
       <div className="fixed inset-0 bg-black flex items-center justify-center">
         <div className="text-gray-400">Loading...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-4">
+        <div className="text-gray-400">{error}</div>
+        <button
+          onClick={goBack}
+          className="text-gray-300 hover:text-white border border-gray-700 rounded px-4 py-2 transition-colors cursor-pointer"
+        >
+          Back
+        </button>
+      </div>
+    );
+  }
+
+  if (images.length === 0) {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center gap-4">
+        <div className="text-gray-400">No images in this directory</div>
+        <button
+          onClick={goBack}
+          className="text-gray-300 hover:text-white border border-gray-700 rounded px-4 py-2 transition-colors cursor-pointer"
+        >
+          Back
+        </button>
       </div>
     );
   }

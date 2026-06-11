@@ -1,11 +1,48 @@
 import os
 import json
 import hashlib
+import threading
 from flask import Blueprint, request, jsonify, current_app, session
 import db
 from thumbnail import cache_path_for, _resolve_thumb_target, _migrate_legacy, CACHE_DIR as THUMB_CACHE_DIR
 
 browse_bp = Blueprint("browse", __name__)
+
+# In-memory dir→thumbnail-hash index, persisted to disk as a cache.
+# Loaded once and written atomically: the old per-request load/modify/write
+# cycle raced with itself, losing entries or truncating the file.
+_DIR_INDEX_FILE = os.path.join(THUMB_CACHE_DIR, "dir_thumb_index.json")
+_dir_index = None
+_dir_index_lock = threading.Lock()
+
+
+def _get_dir_index():
+    global _dir_index
+    with _dir_index_lock:
+        if _dir_index is None:
+            data = {}
+            if os.path.exists(_DIR_INDEX_FILE):
+                try:
+                    with open(_DIR_INDEX_FILE) as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            _dir_index = data
+        return _dir_index
+
+
+def _persist_dir_index():
+    with _dir_index_lock:
+        if _dir_index is None:
+            return
+        try:
+            os.makedirs(os.path.dirname(_DIR_INDEX_FILE), exist_ok=True)
+            tmp = _DIR_INDEX_FILE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(_dir_index, f)
+            os.rename(tmp, _DIR_INDEX_FILE)
+        except OSError:
+            pass
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 AUDIO_EXTS = {".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus"}
@@ -52,8 +89,10 @@ def browse():
     extensions = set(config["media"].get("extensions", []))
 
     rel_path = request.args.get("path", "/").lstrip("/")
-    page = max(1, int(request.args.get("page", 1)))
-    raw_limit = int(request.args.get("limit", 50))
+    page = max(1, request.args.get("page", 1, type=int) or 1)
+    raw_limit = request.args.get("limit", 50, type=int)
+    if raw_limit is None:
+        raw_limit = 50
     limit = 0 if raw_limit == 0 else min(200, max(1, raw_limit))
     search = request.args.get("search", "").lower().strip()
     letter = request.args.get("letter", "").strip()
@@ -62,7 +101,8 @@ def browse():
     lite = request.args.get("lite", "0") == "1"
 
     abs_path = os.path.realpath(os.path.join(root, rel_path))
-    if not abs_path.startswith(os.path.realpath(root)):
+    real_root_check = os.path.realpath(root)
+    if abs_path != real_root_check and not abs_path.startswith(real_root_check + os.sep):
         return jsonify({"error": "forbidden"}), 403
     if not os.path.isdir(abs_path):
         return jsonify({"error": "not found"}), 404
@@ -84,16 +124,25 @@ def browse():
 
     entries = []
     has_audio_files = False
+    # scandir caches stat results on the DirEntry — the old listdir +
+    # isdir/getsize/getmtime pattern cost 3-4 syscalls per entry.
     try:
-        items = sorted(os.listdir(abs_path), key=str.lower)
+        with os.scandir(abs_path) as it:
+            dirents = sorted(it, key=lambda d: d.name.lower())
     except PermissionError:
         return jsonify({"error": "permission denied"}), 403
+    except OSError:
+        return jsonify({"error": "not found"}), 404
 
-    for name in items:
+    for de in dirents:
+        name = de.name
         if name.startswith("."):
             continue
-        full = os.path.join(abs_path, name)
-        is_dir = os.path.isdir(full)
+        try:
+            is_dir = de.is_dir()
+        except OSError:
+            continue
+        full = de.path
         ext = os.path.splitext(name)[1].lower()
 
         if not is_dir and ext not in extensions:
@@ -108,6 +157,12 @@ def browse():
             "is_dir": is_dir,
             "_abs": full,
         }
+        stat_result = None
+        if not lite:
+            try:
+                stat_result = de.stat()
+            except OSError:
+                pass
         if not is_dir:
             entry["is_image"] = ext in IMAGE_EXTS
             entry["is_audio"] = ext in AUDIO_EXTS
@@ -117,25 +172,9 @@ def browse():
             if ext in AUDIO_EXTS:
                 has_audio_files = True
             if not lite:
-                try:
-                    entry["size"] = os.path.getsize(full)
-                except OSError:
-                    entry["size"] = 0
-        else:
-            # For subdirectories in music context, scan for cover art and detect albums
-            if is_music_context and not lite:
-                cover = _find_cover_art(full, rel_path, name)
-                if cover:
-                    entry["cover_art"] = cover
-                # Only mark as album at depth >= 1 (inside an artist folder)
-                # At depth 0 (music root), subdirectories are artists, not albums
-                if music_depth >= 1 and _dir_has_audio(full):
-                    entry["is_album"] = True
+                entry["size"] = stat_result.st_size if stat_result else 0
         if not lite:
-            try:
-                entry["mtime"] = os.path.getmtime(full)
-            except OSError:
-                entry["mtime"] = 0
+            entry["mtime"] = stat_result.st_mtime if stat_result else 0
         entries.append(entry)
 
     # Determine if this is an album-level folder (contains audio files)
@@ -196,6 +235,21 @@ def browse():
         start = (page - 1) * limit
         page_entries = entries[start : start + limit]
 
+    # Music context: cover art + album detection scan subdirectories
+    # (1-2 listdir calls each), so only do it for the visible page —
+    # doing it for every entry made artist indexes O(dirs) per request.
+    if is_music_context and not lite:
+        for e in page_entries:
+            if not e["is_dir"]:
+                continue
+            cover = _find_cover_art(e["_abs"], rel_path, e["name"])
+            if cover:
+                e["cover_art"] = cover
+            # Only mark as album at depth >= 1 (inside an artist folder)
+            # At depth 0 (music root), subdirectories are artists, not albums
+            if music_depth >= 1 and _dir_has_audio(e["_abs"]):
+                e["is_album"] = True
+
     # Attach file_status to page entries (skip in lite mode)
     if not lite:
         user_id = session.get("user", "anonymous")
@@ -227,15 +281,9 @@ def browse():
                     overrides = json.load(f)
             except Exception:
                 pass
-        # Load dir→hash index for fast directory thumbnail lookups
-        dir_index_file = os.path.join(THUMB_CACHE_DIR, "dir_thumb_index.json")
-        dir_index = {}
-        if os.path.exists(dir_index_file):
-            try:
-                with open(dir_index_file) as f:
-                    dir_index = json.load(f)
-            except Exception:
-                pass
+        # Dir→hash index for fast directory thumbnail lookups (in-memory,
+        # persisted as a disk cache)
+        dir_index = _get_dir_index()
         dir_index_dirty = False
         real_root = os.path.realpath(root)
         for e in page_entries:
@@ -277,12 +325,7 @@ def browse():
                     dir_index_dirty = True
         # Persist updated dir index
         if dir_index_dirty:
-            try:
-                os.makedirs(os.path.dirname(dir_index_file), exist_ok=True)
-                with open(dir_index_file, "w") as f:
-                    json.dump(dir_index, f)
-            except Exception:
-                pass
+            _persist_dir_index()
 
     # Strip internal fields before response
     for e in page_entries:

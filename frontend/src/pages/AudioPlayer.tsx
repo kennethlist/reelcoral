@@ -58,13 +58,20 @@ export default function AudioPlayer() {
   }, []);
 
   // Load audio source
+  const prevPathRef = useRef<string | null>(null);
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !filePath) return;
+    const sameFile = prevPathRef.current === filePath;
+    prevPathRef.current = filePath;
+    const wasPlaying = !audio.paused;
     audio.src = audioUrl(filePath, profile);
     audio.volume = volume;
     audio.muted = muted;
-    audio.play().catch(() => {});
+    // Auto-play new files; on profile change only resume if it was playing
+    if (!sameFile || wasPlaying) {
+      audio.play().catch(() => {});
+    }
   }, [filePath, profile]);
 
   // Load siblings
@@ -157,6 +164,8 @@ export default function AudioPlayer() {
     const handler = (e: KeyboardEvent) => {
       const audio = audioRef.current;
       if (!audio) return;
+      // Don't hijack keys while interacting with form controls (e.g. volume slider)
+      if ((e.target as HTMLElement).closest("input, select, textarea")) return;
       if (e.key === " ") {
         e.preventDefault();
         audio.paused ? audio.play() : audio.pause();
@@ -201,6 +210,15 @@ export default function AudioPlayer() {
         audioRef.current.currentTime = details.seekTime;
       }
     });
+
+    return () => {
+      navigator.mediaSession.metadata = null;
+      navigator.mediaSession.setActionHandler("play", null);
+      navigator.mediaSession.setActionHandler("pause", null);
+      navigator.mediaSession.setActionHandler("nexttrack", null);
+      navigator.mediaSession.setActionHandler("previoustrack", null);
+      navigator.mediaSession.setActionHandler("seekto", null);
+    };
   }, [filePath, fileName, hasNext, hasPrev, goToSibling]);
 
   // MediaSession playback state
@@ -265,14 +283,20 @@ export default function AudioPlayer() {
     const audio = audioRef.current;
     const pos = audio?.currentTime || 0;
     setProfile(newProfile);
-    localStorage.setItem(PROFILE_KEY, newProfile);
+    try {
+      localStorage.setItem(PROFILE_KEY, newProfile);
+    } catch {}
     setShowQuality(false);
-    // Restore position after source change
-    setTimeout(() => {
-      if (audioRef.current && pos > 0) {
-        audioRef.current.currentTime = pos;
-      }
-    }, 100);
+    // Restore position once the new source's metadata is loaded
+    if (audio && pos > 0) {
+      audio.addEventListener(
+        "loadedmetadata",
+        () => {
+          audio.currentTime = pos;
+        },
+        { once: true }
+      );
+    }
   }
 
   function goBack() {
