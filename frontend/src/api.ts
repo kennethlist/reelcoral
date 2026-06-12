@@ -398,6 +398,17 @@ export async function saveUserData(key: string, data: Record<string, unknown>): 
   if (!res.ok) throw new Error("Failed to save user data");
 }
 
+// Merges only the supplied positions server-side, so positions for other
+// books saved from another tab or device are never overwritten.
+export async function mergeReadPositions(positions: Record<string, unknown>): Promise<void> {
+  const res = await apiFetch("/api/user/data/read_positions/merge", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(positions),
+  });
+  if (!res.ok) throw new Error("Failed to save read positions");
+}
+
 export async function setFileStatus(path: string, status: "opened" | "completed"): Promise<void> {
   const res = await apiFetch("/api/user/file-status", {
     method: "POST",

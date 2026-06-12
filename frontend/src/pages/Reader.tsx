@@ -15,6 +15,7 @@ import {
   getConfig,
   getUserData,
   saveUserData,
+  mergeReadPositions,
   setFileStatus,
 } from "../api";
 import { usePreferences } from "../hooks/usePreferences";
@@ -53,14 +54,22 @@ interface ReadPosition {
 
 let _positionSaveTimer: ReturnType<typeof setTimeout> | null = null;
 const _positionMap: Record<string, ReadPosition> = {};
+// Positions changed in this tab but not yet persisted to the server.
+const _dirtyPositions: Record<string, ReadPosition> = {};
 
 function savePosition(path: string, pos: ReadPosition) {
   _positionMap[path] = pos;
-  // Debounced server save (every 5s)
-  if (_positionSaveTimer) clearTimeout(_positionSaveTimer);
-  _positionSaveTimer = setTimeout(() => {
-    saveUserData("read_positions", { ..._positionMap }).catch(() => {});
-  }, 5000);
+  _dirtyPositions[path] = pos;
+  // Save at a fixed max interval. The timer must NOT reset on each call:
+  // continuous reading (a page flip or scroll every few seconds) would
+  // postpone the save indefinitely, losing the whole session if the tab
+  // is killed without unload events (common on mobile).
+  if (!_positionSaveTimer) {
+    _positionSaveTimer = setTimeout(() => {
+      _positionSaveTimer = null;
+      flushPositionSave();
+    }, 5000);
+  }
 }
 
 function flushPositionSave(useSendBeacon = false) {
@@ -68,15 +77,23 @@ function flushPositionSave(useSendBeacon = false) {
     clearTimeout(_positionSaveTimer);
     _positionSaveTimer = null;
   }
-  if (Object.keys(_positionMap).length > 0) {
-    if (useSendBeacon && navigator.sendBeacon) {
-      navigator.sendBeacon(
-        `/api/user/data/${encodeURIComponent("read_positions")}`,
-        new Blob([JSON.stringify({ ..._positionMap })], { type: "application/json" })
-      );
-    } else {
-      saveUserData("read_positions", { ..._positionMap }).catch(() => {});
-    }
+  const dirty = { ..._dirtyPositions };
+  if (Object.keys(dirty).length === 0) return;
+  for (const k of Object.keys(_dirtyPositions)) delete _dirtyPositions[k];
+  // Send only this tab's changed positions; the server merges them, so a
+  // tab holding stale data can't revert positions saved elsewhere.
+  if (useSendBeacon && navigator.sendBeacon) {
+    navigator.sendBeacon(
+      "/api/user/data/read_positions/merge",
+      new Blob([JSON.stringify(dirty)], { type: "application/json" })
+    );
+  } else {
+    mergeReadPositions(dirty).catch(() => {
+      // Re-mark as dirty so a later flush retries, keeping any newer values.
+      for (const [k, v] of Object.entries(dirty)) {
+        if (!(k in _dirtyPositions)) _dirtyPositions[k] = v;
+      }
+    });
   }
 }
 
@@ -172,6 +189,12 @@ function EpubReader({
   // Pretext prediction data — cached across resizes and settings changes.
   const chapterDataRef = useRef<{ texts: string[]; imageHeights: number[] } | null>(null);
 
+  // Live settings for the async chapter-load callback below: it outlives
+  // renders, and restoring with a navMode captured at effect time (e.g.
+  // server settings arriving mid-load) would skip the position restore.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
   // Load chapters progressively: show chapter 0 immediately, continue in background
   useEffect(() => {
     let cancelled = false;
@@ -213,6 +236,7 @@ function EpubReader({
       // Read from _positionMap directly (module-level, updated by server fetch)
       // rather than the closure-captured initialPosition which may be stale.
       const saved = _positionMap[path] || initialPosition;
+      const s = settingsRef.current;
 
       // Extract text for pretext prediction and cache it
       const texts: string[] = [];
@@ -226,13 +250,13 @@ function EpubReader({
 
       // Predict page count before DOM layout for faster position restore
       const wrapperEl = wrapperRef.current;
-      if (wrapperEl && settings.navMode === "page") {
+      if (wrapperEl && s.navMode === "page") {
         const containerW = wrapperEl.clientWidth;
         const containerH = wrapperEl.clientHeight;
         if (containerW > 0 && containerH > 0) {
-          const font = buildFontString(settings.epubFontSize, settings.epubFontFamily, settings.epubFontWeight);
-          const maxW = computeMaxWidth(containerW, settings.epubMargin, true);
-          const lineHeightPx = settings.epubFontSize * settings.epubLineHeight;
+          const font = buildFontString(s.epubFontSize, s.epubFontFamily, s.epubFontWeight);
+          const maxW = computeMaxWidth(containerW, s.epubMargin, true);
+          const lineHeightPx = s.epubFontSize * s.epubLineHeight;
           const predicted = predictPageCount(texts, imgHeights, font, maxW, lineHeightPx, containerH);
           setTotalPages(predicted);
           if (saved?.progress != null) {
@@ -251,13 +275,13 @@ function EpubReader({
       if (saved?.progress != null) {
         progressRef.current = saved.progress;
       }
-      if (settings.navMode === "scroll" && saved?.scrollY) {
+      if (s.navMode === "scroll" && saved?.scrollY) {
         setLoading(false);
         requestAnimationFrame(() => {
           contentRef.current?.scrollTo({ top: saved.scrollY });
           requestAnimationFrame(() => setContentReady(true));
         });
-      } else if (settings.navMode === "page" && saved?.progress != null) {
+      } else if (s.navMode === "page" && saved?.progress != null) {
         setLoading(false);
         setContentReady(true); // Show content immediately with predicted position
       } else {
@@ -398,10 +422,13 @@ function EpubReader({
   useEffect(() => {
     if (!info || settings.navMode !== "page") return;
     onPageInfo(currentPage + 1, fullyLoaded ? totalPages : 0);
-    // Only update progress and save after position has been restored to
-    // avoid clobbering the saved progress with 0 during initial loading.
-    if (positionRestoredRef.current) {
-      progressRef.current = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
+    // Only update progress and save after position has been restored AND the
+    // layout produced a real page count. totalPages of 1 on a multi-chapter
+    // book means pagination hasn't run yet (e.g. settings arrived mid-load and
+    // flipped navMode) — deriving progress from it would zero progressRef and
+    // persist {page: 0, progress: 0} over the reader's real saved position.
+    if (positionRestoredRef.current && fullyLoaded && totalPages > 1) {
+      progressRef.current = currentPage / (totalPages - 1);
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       saveTimerRef.current = setTimeout(() => {
         const progress = totalPages > 1 ? currentPage / (totalPages - 1) : 0;
@@ -427,8 +454,16 @@ function EpubReader({
           chapter,
         });
       } else {
-        const y = contentRef.current?.scrollTop || 0;
-        savePosition(path, { scrollY: y });
+        // Only save if the user actually scrolled somewhere: overwriting the
+        // entry with scrollY 0 (and no progress) would wipe a position saved
+        // earlier in page mode.
+        const el = contentRef.current;
+        const y = el?.scrollTop || 0;
+        if (el && y > 0) {
+          const maxScroll = el.scrollHeight - el.clientHeight;
+          const progress = maxScroll > 0 ? y / maxScroll : 0;
+          savePosition(path, { scrollY: y, progress });
+        }
       }
     };
   }, [path, settings.navMode, totalPages, info]);
@@ -451,7 +486,7 @@ function EpubReader({
       const nextPage = currentPage + delta;
       if (nextPage >= 0 && nextPage < totalPages) {
         setCurrentPage(nextPage);
-        progressRef.current = totalPages > 1 ? nextPage / (totalPages - 1) : 0;
+        if (totalPages > 1) progressRef.current = nextPage / (totalPages - 1);
       }
     },
     [currentPage, totalPages, settings.navMode]
@@ -463,7 +498,7 @@ function EpubReader({
       if (settings.navMode === "scroll") return;
       const clamped = Math.max(0, Math.min(page, totalPages - 1));
       setCurrentPage(clamped);
-      progressRef.current = totalPages > 1 ? clamped / (totalPages - 1) : 0;
+      if (totalPages > 1) progressRef.current = clamped / (totalPages - 1);
     },
     [totalPages, settings.navMode]
   );
@@ -1204,6 +1239,10 @@ export default function Reader() {
   const [initialPosition, setInitialPosition] = useState<ReadPosition | null | undefined>(
     () => _positionMap[currentPath] || undefined
   );
+  // Don't mount the reader until server settings have been applied: if it
+  // mounts with stale local settings (e.g. a different navMode) and the
+  // server values arrive mid-load, the position restore is skipped.
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
   // Apply server defaults for book font settings (only if user hasn't saved a preference)
   useEffect(() => {
@@ -1230,10 +1269,12 @@ export default function Reader() {
           return merged;
         });
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setSettingsLoaded(true));
     getUserData("read_positions").then((serverPositions) => {
-      if (serverPositions && Object.keys(serverPositions).length > 0) {
-        Object.assign(_positionMap, serverPositions);
+      // Don't overwrite entries with pending local changes — the server
+      // copy may predate an in-flight save from this tab.
+      for (const [k, v] of Object.entries(serverPositions || {})) {
+        if (!(k in _dirtyPositions)) _positionMap[k] = v as ReadPosition;
       }
       setInitialPosition(_positionMap[currentPath] || null);
     }).catch(() => {
@@ -1241,12 +1282,22 @@ export default function Reader() {
     });
   }, []);
 
-  // Flush position save on unmount and tab close
+  // Flush position save on unmount, tab close, and tab hide. beforeunload
+  // alone is not enough: mobile browsers usually kill backgrounded tabs and
+  // PWAs without firing it, so also flush on pagehide and visibilitychange
+  // (the events that reliably fire on mobile app-switch).
   useEffect(() => {
-    const onBeforeUnload = () => flushPositionSave(true);
-    window.addEventListener("beforeunload", onBeforeUnload);
+    const flushNow = () => flushPositionSave(true);
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") flushPositionSave(true);
+    };
+    window.addEventListener("beforeunload", flushNow);
+    window.addEventListener("pagehide", flushNow);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("beforeunload", flushNow);
+      window.removeEventListener("pagehide", flushNow);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
       flushPositionSave();
     };
   }, []);
@@ -1520,7 +1571,7 @@ export default function Reader() {
 
       {/* Content area */}
       <div className="flex-1 flex flex-col pt-[env(safe-area-inset-top)] overflow-hidden">
-        {initialPosition === undefined ? (
+        {initialPosition === undefined || !settingsLoaded ? (
           <div className="flex-1 flex items-center justify-center text-zinc-500">Loading…</div>
         ) : (
           <>

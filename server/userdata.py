@@ -40,7 +40,30 @@ def save_data(key):
     if key not in ("read_positions", "reader_settings", "dir_sort"):
         return jsonify({"error": "invalid key"}), 400
     body = request.get_json(silent=True) or {}
+    if key == "read_positions":
+        # Merge instead of replace: a client holding a stale copy of the map
+        # must not wipe or revert positions saved from another tab or device.
+        existing = json.loads(db.get_user_data(_user_id(), key))
+        existing.update(body)
+        body = existing
     db.save_user_data(_user_id(), key, json.dumps(body))
+    return jsonify({"ok": True})
+
+
+@userdata_bp.route("/data/read_positions/merge", methods=["PUT", "POST"])
+def merge_read_positions():
+    """Merge the supplied positions into the stored map.
+
+    Clients send only the positions that changed in their tab, so saving
+    never clobbers positions for other books updated elsewhere.
+    """
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"error": "invalid body"}), 400
+    user_id = _user_id()
+    existing = json.loads(db.get_user_data(user_id, "read_positions"))
+    existing.update(body)
+    db.save_user_data(user_id, "read_positions", json.dumps(existing))
     return jsonify({"ok": True})
 
 
