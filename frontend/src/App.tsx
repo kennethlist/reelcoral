@@ -6,7 +6,7 @@ import Player from "./pages/Player";
 import AudioPlayer from "./pages/AudioPlayer";
 import Gallery from "./pages/Gallery";
 import Reader from "./pages/Reader";
-import { checkAuth, migrateLocalStorage, onAuthLost } from "./api";
+import { checkAuth, loginWithKey, migrateLocalStorage, onAuthLost } from "./api";
 import { MusicPlayerProvider } from "./hooks/useMusicPlayer";
 import MusicBar from "./components/MusicBar";
 
@@ -67,6 +67,26 @@ export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const key = params.get("key");
+
+    if (key) {
+      // Strip the key from the URL so it isn't left in history / shared again.
+      params.delete("key");
+      const search = params.toString();
+      const newUrl =
+        window.location.pathname +
+        (search ? `?${search}` : "") +
+        window.location.hash;
+      window.history.replaceState({}, "", newUrl);
+
+      loginWithKey(key).then((ok) => {
+        if (ok) setAuthed(true);
+        else checkAuth().then(setAuthed);
+      });
+      return;
+    }
+
     checkAuth().then(setAuthed);
   }, []);
 

@@ -85,6 +85,10 @@ defaults:
   book_line_height: 1.7      # 1.0-3.0
 
 auth:
+  # Optional shared access key. Anyone visiting with ?key=<access_key> in the
+  # URL is logged in automatically (as the "guest" user) and skips the login
+  # screen. Leave unset/empty to disable. Use a long random string.
+  access_key: ""
   users:
     - username: "admin"
       password: "admin"

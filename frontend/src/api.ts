@@ -33,6 +33,16 @@ export async function login(username: string, password: string): Promise<boolean
   return res.ok;
 }
 
+export async function loginWithKey(key: string): Promise<boolean> {
+  const res = await fetch("/api/auth/key", {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key }),
+  });
+  return res.ok;
+}
+
 export async function logout(): Promise<void> {
   await fetch("/api/auth/logout", { method: "POST" });
 }

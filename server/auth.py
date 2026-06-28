@@ -26,6 +26,21 @@ def login():
     return jsonify({"error": "invalid credentials"}), 401
 
 
+@auth_bp.route("/key", methods=["POST"])
+def key_login():
+    data = request.get_json(silent=True) or {}
+    key = data.get("key", "")
+
+    access_key = current_app.config["MEDIA"].get("auth", {}).get("access_key")
+    if access_key and key == access_key:
+        session.clear()
+        session["user"] = "guest"
+        session.permanent = True
+        return jsonify({"ok": True, "username": "guest"})
+
+    return jsonify({"error": "invalid key"}), 401
+
+
 @auth_bp.route("/logout", methods=["POST"])
 def logout():
     session.pop("user", None)
