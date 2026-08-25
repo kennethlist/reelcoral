@@ -94,6 +94,7 @@ def create_app():
                 "thumbnail_candidates": defaults_cfg.get("thumbnail_candidates", 3),
                 "grid_size": defaults_cfg.get("grid_size", "small"),
                 "page_size": defaults_cfg.get("page_size", 12),
+                "root_pagination": bool(defaults_cfg.get("root_pagination", False)),
                 "book_font": defaults_cfg.get("book_font", "serif"),
                 "book_font_weight": defaults_cfg.get("book_font_weight", 400),
                 "book_line_height": defaults_cfg.get("book_line_height", 1.7),

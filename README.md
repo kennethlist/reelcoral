@@ -123,6 +123,7 @@ Configuration is managed through `data/config.yml`. See `data/config.example.yml
 | `thumbnails.threads` | Threads for batch thumbnail generation | `24` |
 | `defaults.grid_size` | Browse grid size (`small` or `large`) | `small` |
 | `defaults.page_size` | Items per page (12, 24, 36, 48, or 60) | `12` |
+| `defaults.root_pagination` | Paginate the root folder; when off it lists all items | `false` |
 
 ### Environment Variables
 

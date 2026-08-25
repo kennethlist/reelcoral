@@ -233,6 +233,7 @@ export interface AppConfig {
     thumbnail_candidates: number;
     grid_size: string;
     page_size: number;
+    root_pagination: boolean;
     book_font: string;
     book_font_weight: number;
     book_line_height: number;

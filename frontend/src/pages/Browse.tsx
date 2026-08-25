@@ -194,6 +194,13 @@ function AccountMenu({ onLogout, prefs, setPrefs, config }: {
                 ))}
               </select>
             </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-gray-400">Paginate Home</span>
+              <select value={prefs.root_pagination ? "on" : "off"} onChange={(e) => setPrefs({ root_pagination: e.target.value === "on" })} className={selectClass}>
+                <option value="off">Off</option>
+                <option value="on">On</option>
+              </select>
+            </div>
           </div>
           <div className="border-t border-gray-700 my-1" />
           <button
@@ -225,6 +232,9 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const activeLetter = searchParams.get("letter") || null;
   const currentSort = searchParams.get("sort") || "alpha";
   const currentSortDir = searchParams.get("dir") || "asc";
+  // The root folder lists everything in one go; paginating it is opt-in.
+  const effectiveLimit =
+    currentPath === "/" && !prefs.root_pagination ? 0 : prefs.page_size;
 
   const [data, setData] = useState<BrowseResult | null>(null);
   const [error, setError] = useState("");
@@ -303,7 +313,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
     setLoading(true);
     if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
     spinnerTimerRef.current = setTimeout(() => setShowSpinner(true), 300);
-    browse(currentPath, currentPage, prefs.page_size, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
+    browse(currentPath, currentPage, effectiveLimit, currentSearch, activeLetter || undefined, currentSort, currentSortDir)
       .then((result) => {
         if (cancelled) return;
         setData(result);
@@ -353,7 +363,7 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
         setShowSpinner(false);
       });
     return () => { cancelled = true; };
-  }, [currentPath, currentPage, prefs.page_size, currentSearch, activeLetter, currentSort, currentSortDir]);
+  }, [currentPath, currentPage, effectiveLimit, currentSearch, activeLetter, currentSort, currentSortDir]);
 
   function addSortParams(params: Record<string, string>, sort = currentSort, dir = currentSortDir) {
     if (sort !== "alpha") params.sort = sort;

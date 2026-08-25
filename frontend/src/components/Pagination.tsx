@@ -35,7 +35,8 @@ const btn =
 const navBtn = `${btn} bg-gray-800 disabled:opacity-30 hover:bg-gray-700`;
 
 export default function Pagination({ page, total, limit, onPageChange }: Props) {
-  const totalPages = Math.ceil(total / limit);
+  // limit 0 means the caller asked for everything in one go — nothing to page.
+  const totalPages = limit > 0 ? Math.ceil(total / limit) : 1;
   const [jumpValue, setJumpValue] = useState("");
 
   if (totalPages <= 1) return null;
