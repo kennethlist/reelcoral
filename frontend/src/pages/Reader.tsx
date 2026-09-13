@@ -172,6 +172,9 @@ function EpubReader({
   const [totalPages, setTotalPages] = useState(1);
   const [contentWidth, setContentWidth] = useState(0);
   const [contentHeight, setContentHeight] = useState(0);
+  // Off-screen gutter between pages. Sliding by width + gap means any sub-pixel
+  // rounding shows blank gutter rather than a sliver of the neighbouring page.
+  const PAGE_GAP = 48;
   // Track reading progress as a fraction (0..1) so resizes keep the same position
   const progressRef = useRef(0);
   // Don't save position until the book is fully loaded and position is restored
@@ -300,7 +303,9 @@ function EpubReader({
   // Phase 1: measure the clipping wrapper's dimensions.
   const measureSize = useCallback(() => {
     if (settings.navMode !== "page" || !wrapperRef.current) return;
-    const colW = wrapperRef.current.clientWidth;
+    // Use the exact fractional width the browser lays columns at (not the rounded
+    // clientWidth) so column positions don't drift across many pages.
+    const colW = wrapperRef.current.getBoundingClientRect().width;
     const colH = wrapperRef.current.clientHeight;
     if (colW > 0) setContentWidth(colW);
     if (colH > 0) setContentHeight(colH);
@@ -312,11 +317,12 @@ function EpubReader({
   // Uses progressRef to maintain reading position proportionally across resizes.
   const countPages = useCallback(() => {
     if (settings.navMode !== "page" || !innerRef.current || !wrapperRef.current) return;
-    const pageWidth = wrapperRef.current.clientWidth;
+    const pageWidth = wrapperRef.current.getBoundingClientRect().width;
     if (pageWidth <= 0) return;
     const scrollW = innerRef.current.scrollWidth;
     if (scrollW <= 0) return;
-    const pages = Math.max(1, Math.round(scrollW / pageWidth));
+    // With a gutter, N pages span N*pageWidth + (N-1)*gap, so N = (scrollW + gap) / (pageWidth + gap).
+    const pages = Math.max(1, Math.round((scrollW + PAGE_GAP) / (pageWidth + PAGE_GAP)));
     setTotalPages(pages);
     // Restore position from progress fraction
     const newPage = Math.min(Math.round(progressRef.current * (pages - 1)), pages - 1);
@@ -413,7 +419,7 @@ function EpubReader({
   // massive dangerouslySetInnerHTML content on every page flip).
   useEffect(() => {
     if (settings.navMode !== "page" || !innerRef.current || contentWidth <= 0) return;
-    innerRef.current.style.transform = `translate3d(-${currentPage * contentWidth}px, 0, 0)`;
+    innerRef.current.style.transform = `translate3d(-${currentPage * (contentWidth + PAGE_GAP)}px, 0, 0)`;
   }, [currentPage, contentWidth, settings.navMode]);
 
   // Update page info for parent and save position (debounced to avoid
@@ -534,7 +540,7 @@ function EpubReader({
             className="epub-content"
             style={{
               height: "100%",
-              ...(columnsReady ? { columnWidth: `${contentWidth}px`, columnGap: 0, columnFill: "auto" as const } : {}),
+              ...(columnsReady ? { columnWidth: `${contentWidth}px`, columnGap: `${PAGE_GAP}px`, columnFill: "auto" as const } : {}),
             }}
             dangerouslySetInnerHTML={{ __html: html }}
           />
