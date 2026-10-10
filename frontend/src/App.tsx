@@ -1,5 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useState, useEffect, type ReactNode } from "react";
 import Login from "./pages/Login";
 import Browse from "./pages/Browse";
 import Player from "./pages/Player";
@@ -9,6 +9,7 @@ import Reader from "./pages/Reader";
 import { checkAuth, loginWithKey, migrateLocalStorage, onAuthLost } from "./api";
 import { MusicPlayerProvider } from "./hooks/useMusicPlayer";
 import MusicBar from "./components/MusicBar";
+import { RouteTracker, restoreStandaloneRoute, clearSavedRoute } from "./hooks/useRouteRestore";
 
 function useMigration(authed: boolean | null) {
   useEffect(() => {
@@ -63,10 +64,27 @@ function useMigration(authed: boolean | null) {
   }, [authed]);
 }
 
+function RequireAuth({ authed, children }: { authed: boolean; children: ReactNode }) {
+  const location = useLocation();
+  if (authed) return <>{children}</>;
+  return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
+}
+
+function LoginRoute({ authed, onLogin }: { authed: boolean; onLogin: () => void }) {
+  const location = useLocation();
+  if (!authed) return <Login onLogin={onLogin} />;
+  const from = (location.state as { from?: string } | null)?.from;
+  const target = from && from.startsWith("/") && !from.startsWith("/login") ? from : "/";
+  return <Navigate to={target} replace />;
+}
+
 export default function App() {
   const [authed, setAuthed] = useState<boolean | null>(null);
 
   useEffect(() => {
+    // Must run before BrowserRouter mounts so the router picks up the restored URL.
+    restoreStandaloneRoute();
+
     const params = new URLSearchParams(window.location.search);
     const key = params.get("key");
 
@@ -108,37 +126,27 @@ export default function App() {
   return (
     <MusicPlayerProvider>
       <BrowserRouter>
+        <RouteTracker />
         <Routes>
           <Route
             path="/login"
-            element={
-              authed ? (
-                <Navigate to="/" replace />
-              ) : (
-                <Login onLogin={() => setAuthed(true)} />
-              )
-            }
+            element={<LoginRoute authed={authed} onLogin={() => setAuthed(true)} />}
           />
-          <Route
-            path="/play"
-            element={authed ? <Player /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/audio"
-            element={authed ? <AudioPlayer /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/gallery"
-            element={authed ? <Gallery /> : <Navigate to="/login" replace />}
-          />
-          <Route
-            path="/read"
-            element={authed ? <Reader /> : <Navigate to="/login" replace />}
-          />
+          <Route path="/play" element={<RequireAuth authed={authed}><Player /></RequireAuth>} />
+          <Route path="/audio" element={<RequireAuth authed={authed}><AudioPlayer /></RequireAuth>} />
+          <Route path="/gallery" element={<RequireAuth authed={authed}><Gallery /></RequireAuth>} />
+          <Route path="/read" element={<RequireAuth authed={authed}><Reader /></RequireAuth>} />
           <Route
             path="*"
             element={
-              authed ? <Browse onLogout={() => setAuthed(false)} /> : <Navigate to="/login" replace />
+              <RequireAuth authed={authed}>
+                <Browse
+                  onLogout={() => {
+                    clearSavedRoute();
+                    setAuthed(false);
+                  }}
+                />
+              </RequireAuth>
             }
           />
         </Routes>
