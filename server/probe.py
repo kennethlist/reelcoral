@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import threading
 import subprocess
@@ -15,6 +16,114 @@ probe_bp = Blueprint("probe", __name__)
 _CACHE = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 _CACHE_MAX = 256
+
+# Sidecar subtitle files (Movie.srt, Movie.en.srt, Movie.eng.forced.ass, ...)
+# are exposed as subtitle tracks with indices starting here, so they share
+# the numeric `sub`/`track` parameters embedded streams already use without
+# colliding with ffprobe stream indices.
+EXTERNAL_SUB_BASE = 10000
+EXTERNAL_SUB_EXTS = {".srt", ".ass", ".ssa", ".vtt", ".sub"}
+
+# Map ISO 639-1 (and a few English names) to the 639-2/B codes ffprobe
+# reports for embedded tracks, so sidecars match the user's preferred
+# subtitle language setting.
+_LANG_ALIASES = {
+    "en": "eng", "english": "eng",
+    "es": "spa", "spanish": "spa", "espanol": "spa", "español": "spa",
+    "fr": "fre", "fra": "fre", "french": "fre",
+    "de": "ger", "deu": "ger", "german": "ger",
+    "it": "ita", "italian": "ita",
+    "pt": "por", "portuguese": "por", "pt-br": "por",
+    "ru": "rus", "russian": "rus",
+    "ja": "jpn", "jp": "jpn", "japanese": "jpn",
+    "zh": "chi", "zho": "chi", "chinese": "chi", "zh-cn": "chi", "zh-tw": "chi",
+    "ko": "kor", "korean": "kor",
+    "ar": "ara", "arabic": "ara",
+    "nl": "dut", "nld": "dut", "dutch": "dut",
+    "sv": "swe", "swedish": "swe",
+    "no": "nor", "norwegian": "nor",
+    "da": "dan", "danish": "dan",
+    "fi": "fin", "finnish": "fin",
+    "pl": "pol", "polish": "pol",
+    "tr": "tur", "turkish": "tur",
+    "hi": "hin", "hindi": "hin",
+    "th": "tha", "thai": "tha",
+    "vi": "vie", "vietnamese": "vie",
+    "id": "ind", "indonesian": "ind",
+    "he": "heb", "hebrew": "heb",
+    "el": "gre", "ell": "gre", "greek": "gre",
+    "cs": "cze", "ces": "cze", "czech": "cze",
+    "hu": "hun", "hungarian": "hun",
+    "ro": "rum", "ron": "rum", "romanian": "rum",
+    "uk": "ukr", "ukrainian": "ukr",
+}
+_SUB_FLAGS = {"forced", "sdh", "hi", "cc", "full", "default"}
+
+
+def _parse_sidecar_suffix(suffix: str):
+    """Turn the part between the video stem and the extension (e.g.
+    "en.forced") into (lang, title)."""
+    lang = "und"
+    flags = []
+    for tok in [t for t in re.split(r"[._ ]+", suffix) if t]:
+        low = tok.lower()
+        if low in _SUB_FLAGS:
+            flags.append(low.upper() if low in ("sdh", "cc", "hi") else low)
+        elif lang == "und" and low in _LANG_ALIASES:
+            lang = _LANG_ALIASES[low]
+        elif lang == "und" and len(low) == 3 and low.isalpha():
+            lang = low
+        else:
+            flags.append(tok)
+    return lang, " ".join(flags)
+
+
+def find_external_subtitles(filepath):
+    """List sidecar subtitle files next to `filepath` whose name starts with
+    the video's stem. Order is deterministic (sorted by filename) so the
+    index assigned here can be resolved again later by
+    resolve_external_subtitle()."""
+    directory = os.path.dirname(filepath)
+    stem = os.path.splitext(os.path.basename(filepath))[0]
+    stem_low = stem.lower()
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    found = []
+    for name in sorted(names, key=str.lower):
+        base, ext = os.path.splitext(name)
+        if ext.lower() not in EXTERNAL_SUB_EXTS:
+            continue
+        base_low = base.lower()
+        if base_low == stem_low:
+            suffix = ""
+        elif base_low.startswith(stem_low + "."):
+            suffix = base[len(stem) + 1:]
+        else:
+            continue
+        full = os.path.join(directory, name)
+        if not os.path.isfile(full):
+            continue
+        lang, title = _parse_sidecar_suffix(suffix)
+        found.append({
+            "index": EXTERNAL_SUB_BASE + len(found),
+            "path": full,
+            "codec": ext.lower().lstrip("."),
+            "lang": lang,
+            "title": title,
+        })
+    return found
+
+
+def resolve_external_subtitle(filepath, idx):
+    """Return the sidecar path for an external subtitle index, or None."""
+    if idx is None or idx < EXTERNAL_SUB_BASE:
+        return None
+    for sub in find_external_subtitles(filepath):
+        if sub["index"] == idx:
+            return sub["path"]
+    return None
 
 
 def ffprobe(filepath):
@@ -101,7 +210,18 @@ def get_media_info(filepath, config):
                 "lang": lang,
                 "title": title,
                 "bitmap": codec_name in bitmap_codecs,
+                "external": False,
             })
+
+    for sub in find_external_subtitles(filepath):
+        subtitle_tracks.append({
+            "index": sub["index"],
+            "codec": sub["codec"],
+            "lang": sub["lang"],
+            "title": sub["title"],
+            "bitmap": False,
+            "external": True,
+        })
 
     profiles = []
     for p in config.get("transcoding", {}).get("profiles", []):

@@ -7,6 +7,7 @@ interface Track {
   title: string;
   channels?: number;
   bitmap?: boolean;
+  external?: boolean;
 }
 
 interface Props {
@@ -22,6 +23,7 @@ function trackLabel(t: Track): string {
   if (t.title) parts.push(t.title);
   if (t.channels) parts.push(`${t.channels}ch`);
   if (t.bitmap) parts.push("(bitmap - unsupported)");
+  if (t.external) parts.push("(file)");
   parts.push(`[${t.codec}]`);
   return parts.join(" - ");
 }

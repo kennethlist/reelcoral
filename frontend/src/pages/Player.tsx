@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import Hls from "hls.js";
-import { getMediaInfo, startStream, stopStream, MediaInfo, browse, BrowseEntry, setFileStatus } from "../api";
+import { getMediaInfo, startStream, stopStream, MediaInfo, SubtitleTrack, browse, BrowseEntry, setFileStatus } from "../api";
 import TrackSelector from "../components/TrackSelector";
 import { usePreferences, SubtitleFontSize } from "../hooks/usePreferences";
 
@@ -128,7 +128,7 @@ export default function Player() {
         const langSubs = data.subtitle_tracks.filter(
           (t) => t.lang === prefs.preferred_subtitle_lang && !t.bitmap
         );
-        let bestSub = langSubs[0] ?? null;
+        let bestSub: SubtitleTrack | null = langSubs[0] ?? null;
         if (langSubs.length > 1) {
           // Prefer tracks with "full" in the title
           const fullSub = langSubs.find(
@@ -143,6 +143,12 @@ export default function Player() {
             );
             if (nonSongs.length > 0) bestSub = nonSongs[0];
           }
+        }
+        if (!bestSub) {
+          // A sidecar file with no language in its name (Movie.srt) was
+          // almost certainly put there for this video — use it rather
+          // than showing nothing.
+          bestSub = data.subtitle_tracks.find((t) => t.external && t.lang === "und") ?? null;
         }
         setSubIdx(bestSub?.index ?? null);
       }

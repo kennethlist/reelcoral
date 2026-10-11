@@ -160,26 +160,38 @@ class StreamSession:
         # Build subtitle filter if burning in
         sub_filter = ""
         if self.sub_idx is not None and (profile.get("name") != "original" or needs_transcode):
-            # sub_idx is the absolute stream index — convert to subtitle stream index
-            from probe import ffprobe as _ffprobe
-            probe_data = _ffprobe(self.filepath)
-            si = 0
-            if probe_data:
-                for s in probe_data.get("streams", []):
-                    if s.get("index") == self.sub_idx:
-                        break
-                    if s.get("codec_type") == "subtitle":
-                        si += 1
+            from probe import ffprobe as _ffprobe, resolve_external_subtitle
+            sidecar = resolve_external_subtitle(self.filepath, self.sub_idx)
+            if sidecar:
+                # External sidecar file: feed it to the filter directly.
+                from subtitle import sidecar_charenc
+                sub_source = sidecar
+                opts = ""
+                charenc = sidecar_charenc(sidecar)
+                if charenc:
+                    opts = f":charenc={charenc}"
+            else:
+                # sub_idx is the absolute stream index — convert to subtitle stream index
+                probe_data = _ffprobe(self.filepath)
+                si = 0
+                if probe_data:
+                    for s in probe_data.get("streams", []):
+                        if s.get("index") == self.sub_idx:
+                            break
+                        if s.get("codec_type") == "subtitle":
+                            si += 1
+                sub_source = self.filepath
+                opts = f":si={si}"
             # Escape special characters in filepath for ffmpeg filter
-            escaped = self.filepath.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
+            escaped = sub_source.replace("\\", "\\\\").replace(":", "\\:").replace("'", "\\'")
             if self.start_time > 0:
                 sub_filter = (
                     f"setpts=PTS+{self.start_time}/TB,"
-                    f"subtitles='{escaped}':si={si},"
+                    f"subtitles='{escaped}'{opts},"
                     f"setpts=PTS-{self.start_time}/TB,"
                 )
             else:
-                sub_filter = f"subtitles='{escaped}':si={si},"
+                sub_filter = f"subtitles='{escaped}'{opts},"
 
         self.is_copy_mode = profile.get("name") == "original" and not needs_transcode
         if self.is_copy_mode:

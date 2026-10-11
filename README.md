@@ -9,6 +9,7 @@ A self-hosted media server for streaming video, music, books, and images through
 - Hardware-accelerated encoding via VAAPI or QSV, with software fallback
 - Quality profiles from 240p to 4K, plus original passthrough
 - Multiple audio track and subtitle support (external WebVTT or burn-in)
+- Sidecar subtitle files (`Movie.srt`, `Movie.en.srt`, `Movie.eng.forced.ass`, …) in the same directory appear as subtitle tracks alongside embedded ones
 - Seek, resume, and playback speed controls
 - Thumbnail generation (on-demand or batch) with custom thumbnail upload
 

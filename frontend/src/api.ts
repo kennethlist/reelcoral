@@ -117,6 +117,8 @@ export interface AudioTrack extends Track {
 
 export interface SubtitleTrack extends Track {
   bitmap: boolean;
+  /** True for a sidecar .srt/.ass file next to the video (not an embedded stream) */
+  external?: boolean;
 }
 
 export interface VideoTrack extends Track {

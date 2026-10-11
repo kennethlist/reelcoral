@@ -5,6 +5,7 @@ import subprocess
 from flask import Blueprint, request, jsonify, Response, current_app
 
 from offload import singleflight
+from probe import resolve_external_subtitle
 
 subtitle_bp = Blueprint("subtitle", __name__)
 
@@ -89,17 +90,43 @@ def _shift_vtt(vtt: str, offset: float) -> str:
     return _TS_RE.sub(replace_ts, vtt)
 
 
+def sidecar_charenc(path: str):
+    """Return an ffmpeg charenc for a sidecar subtitle file, or None if it is
+    valid UTF-8. Older .srt files are commonly cp1252/latin-1, which ffmpeg
+    rejects unless told the encoding."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except OSError:
+        return None
+    if data.startswith(b"\xff\xfe") or data.startswith(b"\xfe\xff"):
+        return "UTF-16"
+    try:
+        data.decode("utf-8")
+        return None
+    except UnicodeDecodeError:
+        return "cp1252"
+
+
 def _extract_vtt(filepath: str, track: str) -> bytes:
     """Extract a subtitle track as WebVTT, cached on disk keyed by file mtime.
+
+    `track` is either an embedded stream index or an external sidecar index
+    (see probe.EXTERNAL_SUB_BASE), in which case the sidecar file itself is
+    converted.
 
     The cache stores the raw ffmpeg output, byte-identical to a fresh
     extraction; offset shifting and JSON conversion happen per request.
     """
+    source = filepath
+    sidecar = resolve_external_subtitle(filepath, int(track))
+    if sidecar:
+        source = sidecar
     try:
-        mtime = os.path.getmtime(filepath)
+        mtime = os.path.getmtime(source)
     except OSError:
         mtime = 0
-    key = hashlib.sha256(f"{filepath}|{track}|{mtime}".encode()).hexdigest()
+    key = hashlib.sha256(f"{source}|{track}|{mtime}".encode()).hexdigest()
     cache_path = os.path.join(CACHE_DIR, key[:2], f"{key}.vtt")
 
     if os.path.exists(cache_path):
@@ -110,12 +137,19 @@ def _extract_vtt(filepath: str, track: str) -> bytes:
         if os.path.exists(cache_path):
             with open(cache_path, "rb") as f:
                 return f.read()
-        cmd = [
-            "ffmpeg", "-i", filepath,
-            "-map", f"0:{track}",
-            "-f", "webvtt",
-            "-"
-        ]
+        if sidecar:
+            cmd = ["ffmpeg"]
+            charenc = sidecar_charenc(sidecar)
+            if charenc:
+                cmd += ["-sub_charenc", charenc]
+            cmd += ["-i", sidecar, "-map", "0:s:0", "-f", "webvtt", "-"]
+        else:
+            cmd = [
+                "ffmpeg", "-i", filepath,
+                "-map", f"0:{track}",
+                "-f", "webvtt",
+                "-"
+            ]
         result = subprocess.run(cmd, capture_output=True, timeout=120)
         if result.returncode != 0:
             raise RuntimeError("subtitle extraction failed")
