@@ -48,8 +48,10 @@ def serve_compressed_image():
     if not rel_path:
         return jsonify({"error": "path required"}), 400
 
+    # maxWidth <= 0 means "no downscale" (the gallery uses it for JPEG XL
+    # files at the original-size setting, which still need transcoding).
     max_width = request.args.get("maxWidth", 1920, type=int)
-    quality = request.args.get("quality", 85, type=int)
+    quality = request.args.get("quality", 85 if max_width > 0 else 95, type=int)
 
     abs_path = os.path.realpath(os.path.join(root, rel_path))
     if not abs_path.startswith(os.path.realpath(root) + os.sep):
@@ -81,9 +83,10 @@ def serve_compressed_image():
         # Atomic write: a failed ffmpeg used to leave a partial file that
         # the exists-check above then served (with max-age=86400) forever.
         tmp_out = cache_path + ".part.jpg"
-        cmd = [
-            "ffmpeg", "-i", abs_path,
-            "-vf", f"scale='min({max_width},iw)':-1",
+        cmd = ["ffmpeg", "-i", abs_path]
+        if max_width > 0:
+            cmd += ["-vf", f"scale='min({max_width},iw)':-1"]
+        cmd += [
             "-q:v", str(max(1, min(31, (100 - quality) * 31 // 100 + 1))),
             "-frames:v", "1",
             "-y", tmp_out,

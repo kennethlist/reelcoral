@@ -11,6 +11,15 @@ const SETTINGS_KEY = "rc-reader-settings";
 type PageDirection = "normal" | "reverse" | "horseshoe";
 type PageFit = "width" | "height" | "page";
 
+const MAX_ZOOM = 6;
+// Image bounds (container coords, untransformed) plus the container size
+type ContentRect = { x0: number; y0: number; x1: number; y1: number; W: number; H: number };
+type PinchGesture = {
+  kind: "pinch"; rect: ContentRect; startDist: number; startScale: number;
+  startMid: { x: number; y: number }; startTx: number; startTy: number;
+};
+type PanGesture = { kind: "pan"; rect: ContentRect; startX: number; startY: number; startTx: number; startTy: number };
+
 function loadSetting<T>(key: string, valid: T[], fallback: T): T {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
@@ -43,12 +52,17 @@ export default function Gallery() {
   const [error, setError] = useState("");
   const [controlsVisible, setControlsVisible] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const fullscreenSupported = typeof document !== "undefined" && !!document.fullscreenEnabled;
   const [isTouch] = useState(() => isTouchDevice());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pageDirection, setPageDirection] = useState<PageDirection>(() => loadSetting("pageDirection", ["normal", "reverse", "horseshoe"], "normal"));
   const [pageFit, setPageFit] = useState<PageFit>(() => loadSetting("galleryFit", ["width", "height", "page"], "page"));
   const { prefs, setPrefs } = usePreferences();
   const compressed = prefs.image_max_width > 0;
+  // JPEG XL can't be shown directly (no Pillow decoder, patchy browser support):
+  // always go through the server-side ffmpeg transcode, even at original size.
+  const imageSrc = (p: string) =>
+    compressed || /\.jxl$/i.test(p) ? compressedImageUrl(p, prefs.image_max_width) : mediaUrl(p);
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,6 +76,62 @@ export default function Gallery() {
   const pendingStatusValueRef = useRef<"opened" | "completed">("opened");
   const blackScreenTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => { currentIndexRef.current = currentIndex; }, [currentIndex]);
+
+  // Pinch zoom (touch only). The transform is applied directly to the DOM so
+  // gesture updates don't go through React renders.
+  const imgRef = useRef<HTMLImageElement>(null);
+  const zoomRef = useRef({ scale: 1, tx: 0, ty: 0 });
+  const gestureRef = useRef<PinchGesture | PanGesture | null>(null);
+  const suppressTapRef = useRef(false);
+  const lastTapRef = useRef(0);
+
+  const applyZoom = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const { scale, tx, ty } = zoomRef.current;
+    el.style.transform = scale === 1 && tx === 0 && ty === 0 ? "" : `translate(${tx}px, ${ty}px) scale(${scale})`;
+    // While zoomed, one-finger drags pan the image instead of scrolling natively
+    el.style.touchAction = scale > 1 ? "none" : "";
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    const z = zoomRef.current;
+    // In width fit the view scrolls natively; hand any vertical pan back to scrollTop
+    if (scrollRef.current && z.scale === 1 && z.ty !== 0) scrollRef.current.scrollTop -= z.ty;
+    zoomRef.current = { scale: 1, tx: 0, ty: 0 };
+    applyZoom();
+  }, [applyZoom]);
+
+  // Rendered image bounds in container coordinates at scale 1 (object-contain letterboxing excluded)
+  const measureContent = useCallback((): ContentRect | null => {
+    const c = containerRef.current?.getBoundingClientRect();
+    const img = imgRef.current;
+    if (!c || !img) return null;
+    const b = img.getBoundingClientRect();
+    const { scale: s, tx, ty } = zoomRef.current;
+    // Undo the current transform to get the untransformed box
+    let x0 = (b.left - c.left - tx) / s;
+    let y0 = (b.top - c.top - ty) / s;
+    let x1 = (b.right - c.left - tx) / s;
+    let y1 = (b.bottom - c.top - ty) / s;
+    if (img.naturalWidth && img.naturalHeight) {
+      const bw = x1 - x0, bh = y1 - y0;
+      const r = Math.min(bw / img.naturalWidth, bh / img.naturalHeight);
+      const cw = img.naturalWidth * r, ch = img.naturalHeight * r;
+      x0 += (bw - cw) / 2; x1 = x0 + cw;
+      y0 += (bh - ch) / 2; y1 = y0 + ch;
+    }
+    return { x0, y0, x1, y1, W: c.width, H: c.height };
+  }, []);
+
+  const setZoom = useCallback((scale: number, tx: number, ty: number, r: ContentRect) => {
+    // Keep the image covering the viewport on each axis; center it when it's smaller
+    const cw = (r.x1 - r.x0) * scale, ch = (r.y1 - r.y0) * scale;
+    tx = cw <= r.W ? r.W / 2 - scale * (r.x0 + r.x1) / 2 : Math.min(-scale * r.x0, Math.max(r.W - scale * r.x1, tx));
+    ty = ch <= r.H ? r.H / 2 - scale * (r.y0 + r.y1) / 2 : Math.min(-scale * r.y0, Math.max(r.H - scale * r.y1, ty));
+    zoomRef.current = { scale, tx, ty };
+    applyZoom();
+  }, [applyZoom]);
 
   // Flush pending file status on unmount so the last viewed image is still marked
   useEffect(() => {
@@ -139,6 +209,8 @@ export default function Gallery() {
     };
   }, [currentIndex, images]);
 
+  useEffect(() => { resetZoom(); }, [currentIndex, images, pageFit, resetZoom]);
+
   // Reset scroll position and start black-screen timer on image change
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
@@ -161,9 +233,7 @@ export default function Gallery() {
       const idx = currentIndex + offset;
       if (idx >= 0 && idx < images.length) {
         const path = images[idx].path;
-        const url = compressed
-          ? compressedImageUrl(path, prefs.image_max_width)
-          : mediaUrl(path);
+        const url = imageSrc(path);
         const img = new Image();
         img.src = url;
         preloads.push(img);
@@ -250,12 +320,111 @@ export default function Gallery() {
     }
   }, [settingsOpen]);
 
+  // Mobile: pinch to zoom, one-finger pan while zoomed.
+  // React registers touch listeners as passive, so attach natively to be able to preventDefault.
+  const ready = !loading && !error && images.length > 0;
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || !isTouch || !ready) return;
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const mid = (t: TouchList) => {
+      const c = el.getBoundingClientRect();
+      return { x: (t[0].clientX + t[1].clientX) / 2 - c.left, y: (t[0].clientY + t[1].clientY) / 2 - c.top };
+    };
+
+    const onStart = (e: TouchEvent) => {
+      if ((e.target as HTMLElement).closest("[data-controls]")) return;
+      const z = zoomRef.current;
+      if (e.touches.length === 2) {
+        const rect = measureContent();
+        if (!rect) return;
+        e.preventDefault();
+        gestureRef.current = {
+          kind: "pinch", rect, startDist: dist(e.touches), startScale: z.scale, startMid: mid(e.touches), startTx: z.tx, startTy: z.ty,
+        };
+        suppressTapRef.current = true;
+      } else if (e.touches.length === 1) {
+        suppressTapRef.current = false;
+        if (z.scale > 1) {
+          const rect = measureContent();
+          if (!rect) return;
+          gestureRef.current = {
+            kind: "pan", rect, startX: e.touches[0].clientX, startY: e.touches[0].clientY, startTx: z.tx, startTy: z.ty,
+          };
+        }
+      }
+    };
+
+    const onMove = (e: TouchEvent) => {
+      const g = gestureRef.current;
+      if (!g) return;
+      if (g.kind === "pinch" && e.touches.length >= 2) {
+        e.preventDefault();
+        const m = mid(e.touches);
+        const scale = Math.min(MAX_ZOOM, Math.max(1, g.startScale * dist(e.touches) / g.startDist));
+        // Keep the point under the fingers fixed while scaling, then follow the fingers
+        const k = scale / g.startScale;
+        setZoom(scale, m.x - k * (g.startMid.x - g.startTx), m.y - k * (g.startMid.y - g.startTy), g.rect);
+      } else if (g.kind === "pan" && e.touches.length === 1) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - g.startX, dy = e.touches[0].clientY - g.startY;
+        if (Math.abs(dx) > 8 || Math.abs(dy) > 8) suppressTapRef.current = true;
+        setZoom(zoomRef.current.scale, g.startTx + dx, g.startTy + dy, g.rect);
+      }
+    };
+
+    const onEnd = (e: TouchEvent) => {
+      const g = gestureRef.current;
+      if (!g) return;
+      if (g.kind === "pinch" && e.touches.length === 1) {
+        // Lifting one finger continues as a pan with the other
+        const z = zoomRef.current;
+        gestureRef.current = {
+          kind: "pan", rect: g.rect, startX: e.touches[0].clientX, startY: e.touches[0].clientY, startTx: z.tx, startTy: z.ty,
+        };
+        return;
+      }
+      if (e.touches.length === 0) {
+        gestureRef.current = null;
+        if (zoomRef.current.scale < 1.05) resetZoom();
+        // The click that follows touchend (if any) fires synchronously, so this
+        // only clears the guard for later mouse clicks on hybrid devices
+        setTimeout(() => { suppressTapRef.current = false; }, 400);
+      }
+    };
+
+    el.addEventListener("touchstart", onStart, { passive: false });
+    el.addEventListener("touchmove", onMove, { passive: false });
+    el.addEventListener("touchend", onEnd);
+    el.addEventListener("touchcancel", onEnd);
+    return () => {
+      el.removeEventListener("touchstart", onStart);
+      el.removeEventListener("touchmove", onMove);
+      el.removeEventListener("touchend", onEnd);
+      el.removeEventListener("touchcancel", onEnd);
+    };
+  }, [isTouch, ready, measureContent, setZoom, resetZoom]);
+
   // Mobile: tap zones — direction-aware
   const handleTap = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
       if (!isTouch) return;
       // Don't handle taps on the overlay controls themselves
       if ((e.target as HTMLElement).closest("[data-controls]")) return;
+      // Ignore the click that can follow a pinch or pan
+      if (suppressTapRef.current) return;
+      // While zoomed the page-turn zones are off: tap toggles controls, double-tap resets zoom
+      if (zoomRef.current.scale > 1) {
+        const now = Date.now();
+        setControlsVisible((v) => !v);
+        if (now - lastTapRef.current < 300) {
+          lastTapRef.current = 0;
+          resetZoom();
+        } else {
+          lastTapRef.current = now;
+        }
+        return;
+      }
 
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
@@ -286,7 +455,7 @@ export default function Gallery() {
         }
       }
     },
-    [isTouch, goTo, pageDirection]
+    [isTouch, goTo, pageDirection, resetZoom]
   );
 
   function toggleFullscreen() {
@@ -398,7 +567,7 @@ export default function Gallery() {
   return (
     <div
       ref={containerRef}
-      className={`fixed inset-0 bg-black flex flex-col select-none ${!isTouch && !controlsVisible ? "cursor-none" : ""}`}
+      className={`fixed inset-0 bg-black flex flex-col select-none overflow-hidden ${!isTouch && !controlsVisible ? "cursor-none" : ""}`}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
       onClick={handleTap}
@@ -519,9 +688,10 @@ export default function Gallery() {
 
       {/* Image area */}
       {currentImage && (
-        <div ref={scrollRef} className={`absolute inset-0 flex ${pageFit === "width" ? "items-start overflow-y-auto" : "items-center"} justify-center`} style={{ paddingTop: "env(safe-area-inset-top)" }}>
+        <div ref={scrollRef} className={`absolute inset-0 flex ${pageFit === "width" ? "items-start overflow-y-auto" : "items-center"} justify-center`} style={{ paddingTop: "env(safe-area-inset-top)", transformOrigin: "0 0" }}>
           <img
-            src={compressed ? compressedImageUrl(currentImage.path, prefs.image_max_width) : mediaUrl(currentImage.path)}
+            ref={imgRef}
+            src={imageSrc(currentImage.path)}
             alt={currentImage.name}
             className={pageFit === "width" ? "w-full h-auto" : pageFit === "height" ? "h-full w-auto" : "w-full h-full object-contain"}
             style={showImage ? undefined : { visibility: "hidden" }}
@@ -565,8 +735,8 @@ export default function Gallery() {
         </button>
       )}
 
-      {/* Fullscreen button (desktop only) */}
-      {!isTouch && (
+      {/* Fullscreen button (hidden where the Fullscreen API is unavailable, e.g. iOS) */}
+      {fullscreenSupported && (
         <button
           data-controls
           onClick={toggleFullscreen}

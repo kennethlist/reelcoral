@@ -1189,6 +1189,9 @@ export default function Reader() {
   const [pageInputFocused, setPageInputFocused] = useState(false);
   const [pageInputValue, setPageInputValue] = useState("");
   const [isTouch] = useState(() => isTouchDevice());
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  // iOS Safari has no Fullscreen API; hide the toggle where it can't work
+  const fullscreenSupported = typeof document !== "undefined" && !!document.fullscreenEnabled;
   const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sliderDraggingRef = useRef(false);
   const suppressShowUntilRef = useRef(0); // timestamp to suppress showControls after click-toggle
@@ -1460,10 +1463,26 @@ export default function Reader() {
   // Note: tap zones (transparent overlay divs) handle all tap/click navigation
   // and overlay toggling — see the JSX below. No manual touch/click handlers needed.
 
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      containerRef.current?.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+
   // Keyboard
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
+      if (e.key === "f" && fullscreenSupported) {
+        toggleFullscreen();
+      } else if (e.key === "Escape") {
         if (settingsOpen) {
           setSettingsOpen(false);
         } else {
@@ -1715,7 +1734,7 @@ export default function Reader() {
           className={`absolute bottom-0 left-0 right-0 z-20 px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-gradient-to-t from-black/90 via-black/60 to-transparent transition-opacity duration-300 ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
           style={{ paddingTop: "2.5rem" }}
         >
-          <div className="flex flex-col gap-2 max-w-lg mx-auto">
+          <div className={`flex flex-col gap-2 max-w-lg mx-auto ${fullscreenSupported ? "pr-12 sm:pr-0" : ""}`}>
             {/* Slider */}
             {pageInfo.total > 1 && (format !== "epub" || settings.showEpubPages) && (
               <div
@@ -1851,6 +1870,28 @@ export default function Reader() {
         </button>
       )}
 
+      {/* Fullscreen toggle */}
+      {fullscreenSupported && (
+        <button
+          data-controls
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit fullscreen (f)" : "Fullscreen (f)"}
+          className={`absolute bottom-4 right-4 z-30 transition-opacity duration-300 cursor-pointer ${controlsVisible ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+          style={{ bottom: "max(1rem, env(safe-area-inset-bottom))" }}
+        >
+          <div className="bg-black/50 rounded-full p-2">
+            {isFullscreen ? (
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5M15 15l5.25 5.25" />
+              </svg>
+            ) : (
+              <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9M20.25 20.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+              </svg>
+            )}
+          </div>
+        </button>
+      )}
 
       {/* EPUB global styles */}
       <style>{`

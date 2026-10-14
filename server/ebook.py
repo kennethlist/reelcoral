@@ -66,7 +66,8 @@ def _parse_epub(abs_path):
 
 _MIME_MAP = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".jpe": "image/jpeg",
              ".png": "image/png", ".gif": "image/gif", ".svg": "image/svg+xml",
-             ".webp": "image/webp", ".bmp": "image/bmp", ".avif": "image/avif"}
+             ".webp": "image/webp", ".bmp": "image/bmp", ".avif": "image/avif",
+             ".jxl": "image/jxl"}
 
 
 def _guess_mime(name):

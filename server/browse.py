@@ -44,7 +44,7 @@ def _persist_dir_index():
         except OSError:
             pass
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".jxl"}
 AUDIO_EXTS = {".mp3", ".flac", ".ogg", ".wav", ".m4a", ".aac", ".wma", ".opus"}
 EBOOK_EXTS = {".epub", ".pdf"}
 COMIC_EXTS = {".cbr", ".cbz", ".zip"}

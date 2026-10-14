@@ -8,6 +8,7 @@ from flask import current_app
 from io import BytesIO
 
 from offload import run_blocking, singleflight
+from jxl import is_jxl, jxl_to_jpeg
 
 comic_bp = Blueprint("comic", __name__)
 
@@ -23,7 +24,7 @@ def _comic_cache_path(abs_path, page, max_width=0):
     cache_dir = os.path.join(CACHE_DIR, COMIC_PAGE_CACHE_SUBDIR, h[:2], h[2:4])
     return os.path.join(cache_dir, f"{h}")
 
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".jxl"}
 
 # In-process LRU cache of archive page lists, keyed by abs_path -> (mtime, names).
 # Avoids re-opening and re-scanning the archive on every page request.
@@ -158,9 +159,12 @@ def comic_page():
     mime_map = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
                 ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp"}
     mime = mime_map.get(ext, "image/jpeg")
+    page_is_jxl = is_jxl(page_name)
 
-    # When resizing, always output JPEG
-    if max_width > 0:
+    # When resizing, always output JPEG. JPEG XL pages are transcoded even at
+    # full size: browsers can't be relied on to decode JXL and Pillow can't
+    # either, so ffmpeg (libjxl) handles the decode (near-lossless at full size).
+    if max_width > 0 or page_is_jxl:
         cached = _comic_cache_path(abs_path, page, max_width) + ".jpg"
         if os.path.exists(cached):
             return send_file(cached, mimetype="image/jpeg")
@@ -174,7 +178,13 @@ def comic_page():
             raw = run_blocking(_read_comic_page, abs_path, page_name)
             if raw is None:
                 return None
-            resized = run_blocking(_resize_image_data, raw, max_width)
+            if page_is_jxl:
+                # ffmpeg subprocess: cooperative under gevent, no offload needed.
+                resized = jxl_to_jpeg(raw, max_width, quality=85 if max_width > 0 else 95)
+            else:
+                resized = run_blocking(_resize_image_data, raw, max_width)
+            if resized is None:
+                return None
             _write_cache_atomic(cached, resized)
             return resized
 

@@ -13,7 +13,7 @@ thumbnail_bp = Blueprint("thumbnail", __name__)
 log = logging.getLogger(__name__)
 
 CACHE_DIR = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
-IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".jxl"}
 BOOK_EXTS = {".epub", ".pdf", ".cbr", ".cbz", ".zip"}
 
 # Global cap on concurrent thumbnail generation (each spawns ffmpeg, and the
@@ -212,7 +212,7 @@ def _extract_zip_comic_first_page(comic_path):
     """Pure-CPU zip comic first-page extraction (safe on the threadpool)."""
     import re
     import zipfile
-    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".jxl"}
 
     def natural_sort_key(s):
         return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]
@@ -233,7 +233,7 @@ def _extract_cbr_comic_first_page(comic_path):
     under gevent), so this must stay in the request greenlet."""
     import re
     import rarfile
-    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".jxl"}
 
     def natural_sort_key(s):
         return [int(c) if c.isdigit() else c.lower() for c in re.split(r'(\d+)', s)]

@@ -251,7 +251,7 @@ def _generate_comic_thumb(comic_path, candidate_path):
     import re as re_mod
 
     ext = os.path.splitext(comic_path)[1].lower()
-    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp"}
+    comic_image_exts = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".jxl"}
 
     def natural_sort_key(s):
         return [int(c) if c.isdigit() else c.lower() for c in re_mod.split(r'(\d+)', s)]

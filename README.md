@@ -23,13 +23,14 @@ A self-hosted media server for streaming video, music, books, and images through
 - **EPUB** reader with chapter navigation, page-flip and scroll modes
 - Configurable font family (bundled webfonts: Liberation, Ubuntu, Noto, Roboto, DejaVu), font size, margins, and background theme (dark, light, amber)
 - **PDF** viewer with fit-to-width, fit-to-height, and fit-to-page modes
-- **CBR/CBZ** comic reader with fit modes and page navigation
+- **CBR/CBZ** comic reader with fit modes and page navigation (JPEG, PNG, GIF, WebP, BMP and JPEG XL pages)
 - Page slider and direct page number input for quick navigation
 - Reading position saved per file
 
 ### Images
 - Full-screen gallery with swipe and keyboard navigation
 - Sequential browsing through all images in a directory
+- JPEG, PNG, GIF, WebP, BMP and JPEG XL (transcoded server-side via ffmpeg/libjxl, so it works in every browser)
 
 ### Browsing
 - Hierarchical directory navigation with breadcrumbs
