@@ -111,6 +111,8 @@ interface ReaderSettings {
   showEpubPages: boolean;
   // PDF
   pdfFit: "width" | "height" | "page";
+  // Comic archives: crop white margins off the top and bottom of each page
+  trimMargins: boolean;
   // All
   navMode: "page" | "scroll";
   pageDirection: "normal" | "reverse" | "horseshoe";
@@ -125,6 +127,7 @@ const defaultSettings: ReaderSettings = {
   epubLineHeight: 1.7,
   showEpubPages: true,
   pdfFit: "width",
+  trimMargins: false,
   navMode: "page",
   pageDirection: "normal",
 };
@@ -707,8 +710,8 @@ function ImagePageReader({
       if (imageMaxWidth > 0) { w = Math.min(w, imageMaxWidth); h = Math.min(h, imageMaxWidth); }
       return pdfPageUrl(path, currentPage, settings.pdfFit, w, h);
     }
-    return comicPageUrl(path, currentPage, imageMaxWidth);
-  }, [path, currentPage, format, settings.pdfFit, containerSize, imageMaxWidth]);
+    return comicPageUrl(path, currentPage, imageMaxWidth, settings.trimMargins);
+  }, [path, currentPage, format, settings.pdfFit, settings.trimMargins, containerSize, imageMaxWidth]);
 
   // Preload nearby pages (prev 1, next 4)
   useEffect(() => {
@@ -723,11 +726,11 @@ function ImagePageReader({
           if (imageMaxWidth > 0) { w = Math.min(w, imageMaxWidth); h = Math.min(h, imageMaxWidth); }
           img.src = pdfPageUrl(path, p, settings.pdfFit, w, h);
         } else {
-          img.src = comicPageUrl(path, p, imageMaxWidth);
+          img.src = comicPageUrl(path, p, imageMaxWidth, settings.trimMargins);
         }
       }
     }
-  }, [currentPage, pageCount, path, format, settings.pdfFit, containerSize]);
+  }, [currentPage, pageCount, path, format, settings.pdfFit, settings.trimMargins, containerSize, imageMaxWidth]);
 
   // Track current page for the background preloader without restarting it on every flip
   const currentPageRef = useRef(currentPage);
@@ -755,12 +758,12 @@ function ImagePageReader({
       const after = () => { if (!cancelled) loadNext(); };
       img.onload = after;
       img.onerror = after;
-      img.src = comicPageUrl(path, p, imageMaxWidth);
+      img.src = comicPageUrl(path, p, imageMaxWidth, settings.trimMargins);
     };
     for (let i = 0; i < CONCURRENCY; i++) loadNext();
 
     return () => { cancelled = true; };
-  }, [path, pageCount, format, imageMaxWidth, settings.navMode]);
+  }, [path, pageCount, format, imageMaxWidth, settings.navMode, settings.trimMargins]);
 
   if (loading) {
     return <div className="flex-1 flex items-center justify-center text-gray-400">Loading...</div>;
@@ -776,7 +779,7 @@ function ImagePageReader({
               src={
                 format === "pdf"
                   ? pdfPageUrl(path, i, settings.pdfFit, Math.min(Math.round(containerSize.width * (window.devicePixelRatio || 1)), imageMaxWidth || Infinity), Math.min(Math.round(containerSize.height * (window.devicePixelRatio || 1)), imageMaxWidth || Infinity))
-                  : comicPageUrl(path, i, imageMaxWidth)
+                  : comicPageUrl(path, i, imageMaxWidth, settings.trimMargins)
               }
               alt={`Page ${i + 1}`}
               className="max-w-full"
@@ -1145,6 +1148,25 @@ function SettingsPanel({
                 </button>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Comic archives: trim white margins */}
+        {(format === "cbr" || format === "cbz") && (
+          <div className="flex items-center justify-between">
+            <label className="text-xs text-gray-400">Trim white margins (top &amp; bottom)</label>
+            <button
+              onClick={() => update({ trimMargins: !settings.trimMargins })}
+              className={`w-10 h-5 rounded-full transition-colors cursor-pointer ${
+                settings.trimMargins ? "bg-blue-600" : "bg-gray-700"
+              }`}
+            >
+              <div
+                className={`w-4 h-4 rounded-full bg-white transition-transform mx-0.5 ${
+                  settings.trimMargins ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
           </div>
         )}
 

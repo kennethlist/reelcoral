@@ -16,10 +16,12 @@ CACHE_DIR = os.environ.get("MEDIA_CACHE_DIR", "/cache/thumbnails")
 COMIC_PAGE_CACHE_SUBDIR = "comic_pages"
 
 
-def _comic_cache_path(abs_path, page, max_width=0):
+def _comic_cache_path(abs_path, page, max_width=0, trim=False):
     """Build a nested cache path for an extracted comic page, including file mtime for invalidation."""
     mtime = os.path.getmtime(abs_path)
     key = f"{abs_path}|{page}|{mtime}|{max_width}"
+    if trim:
+        key += "|trim"
     h = hashlib.sha256(key.encode()).hexdigest()
     cache_dir = os.path.join(CACHE_DIR, COMIC_PAGE_CACHE_SUBDIR, h[:2], h[2:4])
     return os.path.join(cache_dir, f"{h}")
@@ -102,11 +104,53 @@ def comic_info():
     return jsonify({"page_count": len(pages)})
 
 
-def _resize_image_data(data, max_width, quality=85):
-    """Resize image data if wider than max_width and re-encode as JPEG."""
+# Margin trimming: a pixel is "white" at or above TRIM_WHITE_LEVEL (0-255 luma),
+# and a row counts as blank while fewer than TRIM_ROW_INK_FRACTION of its pixels
+# are darker than that. The tolerance keeps JPEG noise and scanner specks in the
+# margin from stopping the trim.
+TRIM_WHITE_LEVEL = 235
+TRIM_ROW_INK_FRACTION = 0.005
+
+
+def _white_margin_rows(img):
+    """Return (top, bottom) row bounds of the content in img, i.e. the image
+    with its white top/bottom margins excluded. Returns None when there is
+    nothing worth trimming (no margin, or an entirely blank page)."""
+    from PIL import Image as PILImage
+    probe = img
+    if probe.mode in ("RGBA", "LA", "La", "RGBa") or (probe.mode == "P" and "transparency" in probe.info):
+        # Treat transparency as white.
+        rgba = probe.convert("RGBA")
+        probe = PILImage.alpha_composite(PILImage.new("RGBA", rgba.size, "white"), rgba)
+    if probe.mode != "L":
+        probe = probe.convert("RGB").convert("L")
+    ink = probe.point(lambda p: 255 if p < TRIM_WHITE_LEVEL else 0)
+    # Box-averaging each row down to one pixel gives its ink fraction (0-255).
+    rows = ink.resize((1, ink.height), PILImage.BOX).tobytes()
+    limit = 255 * TRIM_ROW_INK_FRACTION
+    top = 0
+    while top < len(rows) and rows[top] < limit:
+        top += 1
+    if top == len(rows):
+        return None  # blank page — leave it alone
+    bottom = len(rows)
+    while rows[bottom - 1] < limit:
+        bottom -= 1
+    if top == 0 and bottom == len(rows):
+        return None
+    return top, bottom
+
+
+def _resize_image_data(data, max_width, quality=85, trim=False):
+    """Re-encode image data as JPEG, downscaled if wider than max_width (when
+    that is > 0) and with white top/bottom margins cropped off when trim is set."""
     from PIL import Image as PILImage
     img = PILImage.open(BytesIO(data))
-    if img.width > max_width:
+    if trim:
+        bounds = _white_margin_rows(img)
+        if bounds:
+            img = img.crop((0, bounds[0], img.width, bounds[1]))
+    if 0 < max_width < img.width:
         ratio = max_width / img.width
         new_size = (max_width, round(img.height * ratio))
         img = img.resize(new_size, PILImage.LANCZOS)
@@ -144,6 +188,7 @@ def comic_page():
     path = request.args.get("path", "")
     page = request.args.get("page", 0, type=int)
     max_width = request.args.get("maxWidth", 0, type=int)
+    trim = request.args.get("trim", "") == "1"
     if page is None or max_width is None:
         return jsonify({"error": "invalid parameters"}), 400
     abs_path = _resolve_path(root, path)
@@ -164,8 +209,9 @@ def comic_page():
     # When resizing, always output JPEG. JPEG XL pages are transcoded even at
     # full size: browsers can't be relied on to decode JXL and Pillow can't
     # either, so ffmpeg (libjxl) handles the decode (near-lossless at full size).
-    if max_width > 0 or page_is_jxl:
-        cached = _comic_cache_path(abs_path, page, max_width) + ".jpg"
+    # Trimming white margins also re-encodes, since the crop changes the pixels.
+    if max_width > 0 or page_is_jxl or trim:
+        cached = _comic_cache_path(abs_path, page, max_width, trim) + ".jpg"
         if os.path.exists(cached):
             return send_file(cached, mimetype="image/jpeg")
 
@@ -178,11 +224,17 @@ def comic_page():
             raw = run_blocking(_read_comic_page, abs_path, page_name)
             if raw is None:
                 return None
-            if page_is_jxl:
+            quality = 85 if max_width > 0 else 95
+            if page_is_jxl and not trim:
                 # ffmpeg subprocess: cooperative under gevent, no offload needed.
-                resized = jxl_to_jpeg(raw, max_width, quality=85 if max_width > 0 else 95)
+                resized = jxl_to_jpeg(raw, max_width, quality=quality)
             else:
-                resized = run_blocking(_resize_image_data, raw, max_width)
+                if page_is_jxl:
+                    # Decode at full size first; Pillow then trims and resizes.
+                    raw = jxl_to_jpeg(raw, 0, quality=95)
+                    if raw is None:
+                        return None
+                resized = run_blocking(_resize_image_data, raw, max_width, quality, trim)
             if resized is None:
                 return None
             _write_cache_atomic(cached, resized)

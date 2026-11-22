@@ -304,9 +304,11 @@ export async function getComicInfo(path: string): Promise<ComicInfo> {
   return res.json();
 }
 
-export function comicPageUrl(path: string, page: number, maxWidth = 0): string {
-  const base = `/api/comic/page?path=${encodeURIComponent(path)}&page=${page}`;
-  return maxWidth > 0 ? `${base}&maxWidth=${maxWidth}` : base;
+export function comicPageUrl(path: string, page: number, maxWidth = 0, trim = false): string {
+  let url = `/api/comic/page?path=${encodeURIComponent(path)}&page=${page}`;
+  if (maxWidth > 0) url += `&maxWidth=${maxWidth}`;
+  if (trim) url += "&trim=1";
+  return url;
 }
 
 // PDF API
