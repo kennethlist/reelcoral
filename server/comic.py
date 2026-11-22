@@ -21,7 +21,7 @@ def _comic_cache_path(abs_path, page, max_width=0, trim=False):
     mtime = os.path.getmtime(abs_path)
     key = f"{abs_path}|{page}|{mtime}|{max_width}"
     if trim:
-        key += "|trim"
+        key += "|trim-all"
     h = hashlib.sha256(key.encode()).hexdigest()
     cache_dir = os.path.join(CACHE_DIR, COMIC_PAGE_CACHE_SUBDIR, h[:2], h[2:4])
     return os.path.join(cache_dir, f"{h}")
@@ -105,17 +105,32 @@ def comic_info():
 
 
 # Margin trimming: a pixel is "white" at or above TRIM_WHITE_LEVEL (0-255 luma),
-# and a row counts as blank while fewer than TRIM_ROW_INK_FRACTION of its pixels
-# are darker than that. The tolerance keeps JPEG noise and scanner specks in the
-# margin from stopping the trim.
+# and a row/column counts as blank while fewer than TRIM_LINE_INK_FRACTION of its
+# pixels are darker than that. The tolerance keeps JPEG noise and scanner specks
+# in the margin from stopping the trim.
 TRIM_WHITE_LEVEL = 235
-TRIM_ROW_INK_FRACTION = 0.005
+TRIM_LINE_INK_FRACTION = 0.005
 
 
-def _white_margin_rows(img):
-    """Return (top, bottom) row bounds of the content in img, i.e. the image
-    with its white top/bottom margins excluded. Returns None when there is
-    nothing worth trimming (no margin, or an entirely blank page)."""
+def _content_span(line_ink):
+    """Given per-row (or per-column) ink levels (0-255), return the (start, end)
+    span left after dropping blank lines from both ends, or None if all blank."""
+    limit = 255 * TRIM_LINE_INK_FRACTION
+    start = 0
+    while start < len(line_ink) and line_ink[start] < limit:
+        start += 1
+    if start == len(line_ink):
+        return None
+    end = len(line_ink)
+    while line_ink[end - 1] < limit:
+        end -= 1
+    return start, end
+
+
+def _white_margin_box(img):
+    """Return the (left, top, right, bottom) crop box of the content in img,
+    i.e. the image with its white margins excluded. Returns None when there is
+    nothing to trim (no margin, or an entirely blank page)."""
     from PIL import Image as PILImage
     probe = img
     if probe.mode in ("RGBA", "LA", "La", "RGBa") or (probe.mode == "P" and "transparency" in probe.info):
@@ -126,30 +141,31 @@ def _white_margin_rows(img):
         probe = probe.convert("RGB").convert("L")
     ink = probe.point(lambda p: 255 if p < TRIM_WHITE_LEVEL else 0)
     # Box-averaging each row down to one pixel gives its ink fraction (0-255).
-    rows = ink.resize((1, ink.height), PILImage.BOX).tobytes()
-    limit = 255 * TRIM_ROW_INK_FRACTION
-    top = 0
-    while top < len(rows) and rows[top] < limit:
-        top += 1
-    if top == len(rows):
+    rows = _content_span(ink.resize((1, ink.height), PILImage.BOX).tobytes())
+    if rows is None:
         return None  # blank page — leave it alone
-    bottom = len(rows)
-    while rows[bottom - 1] < limit:
-        bottom -= 1
-    if top == 0 and bottom == len(rows):
+    top, bottom = rows
+    # Measure columns within the kept rows only, so tall blank margins don't
+    # dilute a column's ink fraction.
+    ink = ink.crop((0, top, ink.width, bottom))
+    cols = _content_span(ink.resize((ink.width, 1), PILImage.BOX).tobytes())
+    if cols is None:
         return None
-    return top, bottom
+    left, right = cols
+    if (left, top, right, bottom) == (0, 0, img.width, img.height):
+        return None
+    return left, top, right, bottom
 
 
 def _resize_image_data(data, max_width, quality=85, trim=False):
     """Re-encode image data as JPEG, downscaled if wider than max_width (when
-    that is > 0) and with white top/bottom margins cropped off when trim is set."""
+    that is > 0) and with white margins cropped off all four sides when trim is set."""
     from PIL import Image as PILImage
     img = PILImage.open(BytesIO(data))
     if trim:
-        bounds = _white_margin_rows(img)
-        if bounds:
-            img = img.crop((0, bounds[0], img.width, bounds[1]))
+        box = _white_margin_box(img)
+        if box:
+            img = img.crop(box)
     if 0 < max_width < img.width:
         ratio = max_width / img.width
         new_size = (max_width, round(img.height * ratio))

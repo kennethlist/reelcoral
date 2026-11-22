@@ -111,7 +111,7 @@ interface ReaderSettings {
   showEpubPages: boolean;
   // PDF
   pdfFit: "width" | "height" | "page";
-  // Comic archives: crop white margins off the top and bottom of each page
+  // Comic archives: crop white margins off all sides of each page
   trimMargins: boolean;
   // All
   navMode: "page" | "scroll";
@@ -1154,7 +1154,7 @@ function SettingsPanel({
         {/* Comic archives: trim white margins */}
         {(format === "cbr" || format === "cbz") && (
           <div className="flex items-center justify-between">
-            <label className="text-xs text-gray-400">Trim white margins (top &amp; bottom)</label>
+            <label className="text-xs text-gray-400">Trim white margins</label>
             <button
               onClick={() => update({ trimMargins: !settings.trimMargins })}
               className={`w-10 h-5 rounded-full transition-colors cursor-pointer ${
