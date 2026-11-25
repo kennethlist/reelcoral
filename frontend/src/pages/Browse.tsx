@@ -246,6 +246,25 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
   const [thumbHashMap, setThumbHashMap] = useState<Record<string, ThumbnailInfo>>({});
   const [thumbGenerated, setThumbGenerated] = useState<Set<string>>(new Set());
 
+  // Fullscreen the whole document so it persists while navigating between folders.
+  // iOS Safari has no Fullscreen API; hide the toggle where it can't work.
+  const fullscreenSupported = typeof document !== "undefined" && !!document.fullscreenEnabled;
+  const [isFullscreen, setIsFullscreen] = useState(
+    () => typeof document !== "undefined" && !!document.fullscreenElement
+  );
+  useEffect(() => {
+    const onFs = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+  function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    } else {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+
   useEffect(() => {
     return () => {
       if (spinnerTimerRef.current) clearTimeout(spinnerTimerRef.current);
@@ -821,7 +840,11 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
 
         {/* A-Z sidebar — fixed to right edge, fits between header and bottom */}
         {data && (data.entries.length > 0 || activeLetter) && (
-          <div className={`fixed right-1 top-[max(52px,calc(env(safe-area-inset-top)+44px))] ${music.isVisible ? "bottom-16" : "bottom-0"} z-20 flex flex-col items-center justify-evenly py-4`}>
+          <div className={`fixed right-1 top-[max(52px,calc(env(safe-area-inset-top)+44px))] ${
+            fullscreenSupported
+              ? music.isVisible ? "bottom-28" : "bottom-12"
+              : music.isVisible ? "bottom-16" : "bottom-0"
+          } z-20 flex flex-col items-center justify-evenly py-4`}>
             {"ABCDEFGHIJKLMNOPQRSTUVWXYZ#".split("").map((letter) => {
               const isAvailable = availableLetters.has(letter);
               return (
@@ -839,6 +862,29 @@ export default function Browse({ onLogout }: { onLogout: () => void }) {
           </div>
         )}
       </main>
+
+      {/* Fullscreen toggle — lower right, above the music bar when it's showing */}
+      {fullscreenSupported && (
+        <button
+          onClick={toggleFullscreen}
+          title={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          aria-label={isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+          className="fixed right-2 z-20 cursor-pointer bg-gray-900/80 hover:bg-gray-800 backdrop-blur border border-gray-700 rounded-full p-2 text-gray-300 hover:text-white transition-colors"
+          style={{
+            bottom: music.isVisible
+              ? "4.5rem"
+              : "max(0.5rem, env(safe-area-inset-bottom))",
+          }}
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth={2}>
+            {isFullscreen ? (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9L3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5M15 15l5.25 5.25" />
+            ) : (
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9M20.25 20.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+            )}
+          </svg>
+        </button>
+      )}
 
       {editingThumbnail && (
         <ThumbnailPicker
